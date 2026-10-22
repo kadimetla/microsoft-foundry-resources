@@ -1,27 +1,69 @@
-"""Sample 07a · Red-team AcmeBot locally with PyRIT converters.
+r"""Run the local PyRIT converter lab against AcmeBot (sample 07a).
 
-What this script does
----------------------
-1. Builds AcmeBot — a deliberately permissive customer-service chatbot for
-   ACME Hardware, running on Azure OpenAI.
-2. Uses PyRIT's prompt converters (Base64, ROT13, Flip, Leetspeak) to
-   transform a small set of seed prompts that each target a different harm
-   category (violence, hate, self-harm) plus a jailbreak and a
-   system-prompt-leak attempt.
-3. Sends every (seed × converter) combination to AcmeBot, captures the
-   response, and applies a simple substring-based scorer that flags
-   "attack succeeded" whenever the bot did *not* refuse.
-4. Prints a per-attack table and the overall Attack Success Rate (ASR).
+This process transforms five workshop prompts with four PyRIT converters,
+sends the baseline and transformed prompts to an Azure OpenAI deployment,
+and prints a heuristic attack success table. The scorer is a refusal phrase
+check, not a safety evaluator. "Local" means local orchestration and scoring.
+The target model still runs in Azure and model calls use its quota.
 
-Run this script
----------------
-> python -m venv .venv
-> source .venv/bin/activate                       # macOS / Linux
-> .venv\\Scripts\\activate                          # Windows
-> pip install pyrit openai azure-identity python-dotenv --pre
-> cp .env.example .env                             # then edit .env
-> az login
-> python 07a-local-pyrit.py
+Prerequisites: Python 3.13, Git, Azure CLI and an Azure OpenAI chat model
+deployment you are authorized to evaluate. Your signed in identity needs
+Cognitive Services OpenAI User on that resource, or equivalent access.
+On Mac, also install Homebrew for the unixODBC dependency.
+
+1. Setup
+
+Start from any folder INSIDE this Git clone. Use this lab's own .venv.
+Do not install PyRIT into the root Agent Framework environment or 07b's
+environment. The PyRIT 0.9.0 pin matches this script's initialize_pyrit
+and IN_MEMORY imports. Newer PyRIT releases moved those APIs.
+The OpenAI version range keeps the SDK in that release's API generation.
+These commands do not activate the environment or overwrite existing .env.
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    cd 07-red-teaming/07a-local-pyrit
+    brew list unixodbc >/dev/null 2>&1 || brew install unixodbc
+    test -x .venv/bin/python || python3.13 -m venv .venv
+    .venv/bin/python -m pip install "pyrit==0.9.0" "openai>=1.58.1,<2" azure-identity python-dotenv
+    .venv/bin/python -m pip check
+    test -f .env || cp .env.example .env
+    az login
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    Set-Location .\07-red-teaming\07a-local-pyrit
+    if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+    .\.venv\Scripts\python.exe -m pip install "pyrit==0.9.0" "openai>=1.58.1,<2" azure-identity python-dotenv
+    .\.venv\Scripts\python.exe -m pip check
+    if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+    az login
+
+2. Configure
+
+Edit 07-red-teaming/07a-local-pyrit/.env and set:
+    AZURE_OPENAI_ENDPOINT: https://<resource>.openai.azure.com/
+    AZURE_OPENAI_DEPLOYMENT: your chat model deployment name
+    AZURE_OPENAI_API_VERSION: 2024-10-21, unless your deployment requires another
+The endpoint comes from the Azure OpenAI resource's Keys and Endpoint page.
+Use the deployment name, not just a model family name. No API key is used.
+
+3. Run after saving .env
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    cd 07-red-teaming/07a-local-pyrit
+    .venv/bin/python -X utf8 07a-local-pyrit.py
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    Set-Location .\07-red-teaming\07a-local-pyrit
+    .\.venv\Scripts\python.exe -X utf8 .\07a-local-pyrit.py
+
+For VS Code, select THIS folder's .venv interpreter, not the root .venv.
+The script loads its sibling .env itself. Expected result: 25 scored
+attempts and an aggregate attack success rate. It does not publish an agent.
+Package installation and live execution on Mac and Windows remain unverified.
 """
 
 import asyncio

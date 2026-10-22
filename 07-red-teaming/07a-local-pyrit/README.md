@@ -59,7 +59,8 @@ Total: ~25 model calls, < 2 minutes, < $0.05 on gpt-4o-mini.
 
 | Requirement                                          | Why                                                                                                            |
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **Python 3.10+**                                     | PyRIT requires it.                                                                                              |
+| **Python 3.13 and Git**                              | Match the platform specific commands below and locate the clone root. |
+| **Homebrew on macOS**                               | Installs unixODBC for PyRIT's pyodbc dependency. Windows supplies the ODBC driver manager. |
 | **Azure CLI signed in** (`az login`)                  | We use `DefaultAzureCredential` to call Azure OpenAI keylessly.                                                |
 | **An Azure OpenAI deployment** (gpt-4o-mini suggested) | The target. gpt-4o-mini has real safety alignment to probe; it's also the cheapest option.                      |
 | **A configured `.env` in this folder**               | See [Step 1 below](#step-1--configure-your-env-file).                                                          |
@@ -67,10 +68,18 @@ Total: ~25 model calls, < 2 minutes, < $0.05 on gpt-4o-mini.
 
 ### Step 1 · Configure your `.env` file
 
-1. **Copy the example:**
+1. **Create `.env` only if it is missing. Start inside this Git clone:**
    ```bash
+   cd "$(git rev-parse --show-toplevel)"
    cd 07-red-teaming/07a-local-pyrit
-   cp .env.example .env
+   test -f .env || cp .env.example .env
+   ```
+
+   Windows PowerShell:
+   ```powershell
+   Set-Location -LiteralPath (git rev-parse --show-toplevel)
+   Set-Location .\07-red-teaming\07a-local-pyrit
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
    ```
 
 2. **Open `.env`** and fill in:
@@ -411,36 +420,70 @@ This is **the whole scan loop**, in 25 lines. Four pieces:
 
 ## Running the lab
 
+Start anywhere inside this Git clone, not its parent directory.
+Use the `.venv` in **this lab folder**, not the root Agent Framework
+environment or 07b's environment. The explicit `pyrit==0.9.0` pin preserves
+this script's `from pyrit.common import IN_MEMORY, initialize_pyrit` API.
+The OpenAI version range stays within the SDK generation used by that PyRIT
+release. Do not replace this with an unversioned or prerelease PyRIT install.
+See the official [0.9.0 exports](https://github.com/microsoft/PyRIT/blob/v0.9.0/pyrit/common/__init__.py)
+and [package metadata](https://github.com/microsoft/PyRIT/blob/v0.9.0/pyproject.toml).
+
+### macOS Terminal setup
+
 ```bash
-# 1. cd into this folder
+cd "$(git rev-parse --show-toplevel)"
 cd 07-red-teaming/07a-local-pyrit
-
-# 2. Make a venv and install dependencies
-python -m venv .venv
-source .venv/bin/activate            # macOS / Linux
-# OR on Windows:
-.venv\Scripts\activate
-pip install --upgrade pip
-pip install pyrit openai azure-identity python-dotenv
-
-# 3. Sign in to Azure
+brew list unixodbc >/dev/null 2>&1 || brew install unixodbc
+test -x .venv/bin/python || python3.13 -m venv .venv
+.venv/bin/python -m pip install "pyrit==0.9.0" "openai>=1.58.1,<2" azure-identity python-dotenv
+.venv/bin/python -m pip check
+test -f .env || cp .env.example .env
 az login
-
-# 4. Configure .env (one-time; see Prerequisites → Step 1)
-cp .env.example .env
-#    then open .env and fill in AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_DEPLOYMENT
-
-# 5. Run
-python 07a-local-pyrit.py
 ```
 
-Or in VS Code: open `07a-local-pyrit.py` and click ▶ **Run Python File**.
-The Python extension auto-loads `.env` from this folder.
+### Windows PowerShell setup
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+Set-Location .\07-red-teaming\07a-local-pyrit
+if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+.\.venv\Scripts\python.exe -m pip install "pyrit==0.9.0" "openai>=1.58.1,<2" azure-identity python-dotenv
+.\.venv\Scripts\python.exe -m pip check
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+az login
+```
+
+Edit and save this folder's `.env` with `AZURE_OPENAI_ENDPOINT`,
+`AZURE_OPENAI_DEPLOYMENT` and `AZURE_OPENAI_API_VERSION` before running.
+Existing values are preserved by the setup commands.
+
+### Run on macOS
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+cd 07-red-teaming/07a-local-pyrit
+.venv/bin/python -X utf8 07a-local-pyrit.py
+```
+
+### Run on Windows PowerShell
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+Set-Location .\07-red-teaming\07a-local-pyrit
+.\.venv\Scripts\python.exe -X utf8 .\07a-local-pyrit.py
+```
+
+In VS Code, select **this folder's** `.venv` interpreter before choosing
+**Run Python File**. The script itself loads its sibling `.env`.
+The target model still runs in Azure. Running the lab uses its quota and
+does not publish an agent. Installation and live execution on Mac and Windows
+remain unverified.
 
 The script prints rows as it runs (no buffering wait). Expect total wall
 time of ~60–90 seconds.
 
-> **First-run note.** `pip install pyrit` pulls a hefty dependency tree
+> **Installation note.** PyRIT pulls a substantial dependency tree
 > (~1 GB on disk including `transformers`, `torch` if optional extras are
 > selected). On a fresh venv this can take 2–3 minutes. The lab itself
 > only uses 4 converter classes that don't need ML libraries — a future
@@ -622,10 +665,10 @@ thousands of human-labelled responses.
 
 | Symptom                                                                                  | Cause                                                                                                          | Fix                                                                                                                                                                            |
 | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `RuntimeError: AZURE_OPENAI_ENDPOINT is not configured`                                  | `.env` missing or still has `<YOUR_…>` placeholder.                                                            | `cp .env.example .env` and fill in.                                                                                                                                              |
+| `RuntimeError: AZURE_OPENAI_ENDPOINT is not configured` | `.env` is missing or still contains a placeholder. | Follow the configuration steps under Prerequisites for your platform. Preserve an existing `.env` and fill in the required values. |
 | `401 PermissionDenied` from Azure OpenAI                                                  | Your `az login` identity lacks `Cognitive Services OpenAI User` on the resource.                                | Azure admin assigns the role at the resource scope.                                                                                                                              |
 | `429 Too Many Requests`                                                                   | TPM exhausted on the deployment.                                                                                | Increase `asyncio.sleep(...)` between calls, or bump the deployment's TPM in the Azure portal.                                                                                   |
-| `ModuleNotFoundError: pyrit`                                                              | `pip install pyrit` didn't run, or you're running from a different venv.                                        | Activate your venv, then `pip install pyrit openai azure-identity python-dotenv`.                                                                                                |
+| `ModuleNotFoundError: pyrit` | Dependencies are missing from this lab's environment, or another interpreter is selected. | Repeat the platform setup block in Running the lab. Keep `pyrit==0.9.0` and the documented OpenAI range, then use this lab's explicit `.venv` interpreter. |
 | Every row says `✅ safe` (ASR = 0%)                                                       | Either AcmeBot's system prompt is already perfectly hardened, or the substring scorer is matching every response. | Check the **first 80 characters** of a few rows. If responses look like jailbreak hits but you scored them safe, your refusal-phrase list is too aggressive — trim it.            |
 | Every row says `❌ HIT` (ASR = 100%)                                                      | AcmeBot is producing very short responses that don't contain refusal phrases, but also don't contain real harm. | Eyeball the rows. Increase `max_tokens` from 300 to 800 so the model gives full responses. Real safety alignment usually triggers in the first sentence.                          |
 | PyRIT install takes > 5 minutes                                                          | The first `pip install pyrit` pulls a deep dependency tree.                                                     | Be patient. Subsequent installs from cache take seconds.                                                                                                                          |

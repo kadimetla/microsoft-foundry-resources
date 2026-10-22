@@ -1,31 +1,74 @@
-"""Sample 07b · Red-team AcmeBot via Foundry's managed AI Red Teaming Agent.
+r"""Run the Foundry evaluation SDK red team lab against AcmeBot (sample 07b).
 
-What this script does
----------------------
-1. Builds the *same* AcmeBot target as sample 07a — same Azure OpenAI
-   deployment, same system prompt — but wraps it as a Python callback
-   that the Foundry Red Teaming Agent can drive.
-2. Creates a `RedTeam` object configured for four Microsoft Risk and
-   Safety categories (violence, hate/unfairness, sexual, self-harm) with
-   a small number of objectives per category (kept tiny for workshop
-   budget — bump `num_objectives` when you go to production).
-3. Runs `.scan(...)` with two attack strategies (Baseline + Flip).
-   Under the hood Foundry: generates adversarial seed prompts, applies
-   the strategies, calls AcmeBot, and judges responses with its hosted
-   safety evaluator — no judge-model deployment of your own required.
-4. Saves the resulting JSON scorecard locally and prints a summary.
-   The full results also upload to your Foundry project's Evaluations
-   tab automatically.
+The local Python process runs RedTeam.scan with an Azure OpenAI target
+callback, using hosted adversarial generation and safety evaluation.
+It evaluates four risk categories with Baseline and Flip strategies, saves
+a JSON scorecard and integrates results with the configured Foundry project.
+Running it calls Azure services, uses quota and can upload evaluation data.
+It does not deploy a model or publish a named Foundry agent.
 
-Run this script
----------------
-> python -m venv .venv
-> source .venv/bin/activate                       # macOS / Linux
-> .venv\\Scripts\\activate                          # Windows
-> pip install azure-ai-evaluation[redteam] azure-identity openai python-dotenv
-> cp .env.example .env                             # then edit .env
-> az login
-> python 07b-cloud-foundry.py
+Prerequisites: Python 3.13, Git, Azure CLI, a compatible Foundry classic
+project in a supported evaluation region and an Azure OpenAI chat deployment
+you are authorized to evaluate. This azure-ai-evaluation workflow is NOT the
+new Foundry cloud red team API. Microsoft documents it as incompatible with
+the Foundry (new) portal and SDK. See README.md for the official reference.
+Your identity needs Azure AI User on the Foundry project and Cognitive
+Services OpenAI User on the model resource, or equivalent access.
+On Mac, also install Homebrew for PyRIT's unixODBC dependency.
+
+1. Setup
+
+Start from any folder INSIDE this Git clone. Use this lab's own .venv,
+separate from the root Agent Framework environment and 07a's pinned PyRIT.
+The quoted [redteam] extra is required, including in the Mac zsh shell.
+These commands do not activate the environment or overwrite existing .env.
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    cd 07-red-teaming/07b-cloud-foundry
+    brew list unixodbc >/dev/null 2>&1 || brew install unixodbc
+    test -x .venv/bin/python || python3.13 -m venv .venv
+    .venv/bin/python -m pip install "azure-ai-evaluation[redteam]" azure-identity openai python-dotenv
+    .venv/bin/python -m pip check
+    test -f .env || cp .env.example .env
+    az login
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    Set-Location .\07-red-teaming\07b-cloud-foundry
+    if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+    .\.venv\Scripts\python.exe -m pip install "azure-ai-evaluation[redteam]" azure-identity openai python-dotenv
+    .\.venv\Scripts\python.exe -m pip check
+    if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+    az login
+
+2. Configure
+
+Edit 07-red-teaming/07b-cloud-foundry/.env and set:
+    FOUNDRY_PROJECT_ENDPOINT: https://<resource>.services.ai.azure.com/api/projects/<project>
+    AZURE_OPENAI_ENDPOINT: https://<resource>.openai.azure.com/
+    AZURE_OPENAI_DEPLOYMENT: your target model deployment name
+    AZURE_OPENAI_API_VERSION: 2024-10-21, unless your deployment requires another
+    REDTEAM_OUTPUT_PATH: acmebot_redteam_results.json, or another writable path
+Use the project endpoint from Foundry and the Azure OpenAI resource endpoint
+from Azure's Keys and Endpoint page. No API key is used.
+
+3. Run after saving .env
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    cd 07-red-teaming/07b-cloud-foundry
+    .venv/bin/python -X utf8 07b-cloud-foundry.py
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    Set-Location .\07-red-teaming\07b-cloud-foundry
+    .\.venv\Scripts\python.exe -X utf8 .\07b-cloud-foundry.py
+
+These run blocks put relative output paths in this lab's directory.
+For VS Code, select THIS folder's .venv and run from this directory if you
+want the same output location. The script loads its sibling .env itself.
+Package installation and live execution on Mac and Windows remain unverified.
 """
 
 import asyncio

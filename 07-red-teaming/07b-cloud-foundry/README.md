@@ -88,10 +88,18 @@ agent doesn't cover.
 
 ## Prerequisites
 
+**Workflow compatibility:** this file uses `azure-ai-evaluation.red_team`,
+which runs locally with hosted adversarial generation and safety evaluation.
+It is not the new Foundry cloud red team API.
+Microsoft's [evaluation SDK guidance](https://learn.microsoft.com/azure/foundry/how-to/develop/run-scans-ai-red-teaming-agent?view=foundry-classic)
+states that this workflow is incompatible with the Foundry (new) portal and SDK.
+Use a compatible classic project in a supported evaluation region.
+
 | Requirement                                                                          | Why                                                                                                                          |
 | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | **You've completed lab 07a**                                                          | We don't re-explain converters or ASR concepts.                                                                                |
-| **Python 3.10+**                                                                      | Required by `azure-ai-evaluation[redteam]`.                                                                                    |
+| **Python 3.13 and Git**                                                               | Match the platform specific commands below and locate the clone root. |
+| **Homebrew on macOS**                                                                | Installs unixODBC for PyRIT's pyodbc dependency. Windows supplies the ODBC driver manager. |
 | **Azure CLI signed in** (`az login`)                                                  | `DefaultAzureCredential` reads your CLI login for both the Foundry scan and the AcmeBot Azure OpenAI calls.                    |
 | **A Microsoft Foundry project**                                                       | The Red Teaming Agent runs inside the project. The hosted adversarial simulator + judge live there.                            |
 | **`Azure AI User` role** on the Foundry project                                       | Minimum role to run scans. See [Step 2 below](#step-2--grant-yourself-the-azure-ai-user-role).                                |
@@ -101,10 +109,18 @@ agent doesn't cover.
 
 ### Step 1 · Configure your `.env` file
 
-1. **Copy the example:**
+1. **Create `.env` only if it is missing. Start inside this Git clone:**
    ```bash
+   cd "$(git rev-parse --show-toplevel)"
    cd 07-red-teaming/07b-cloud-foundry
-   cp .env.example .env
+   test -f .env || cp .env.example .env
+   ```
+
+   Windows PowerShell:
+   ```powershell
+   Set-Location -LiteralPath (git rev-parse --show-toplevel)
+   Set-Location .\07-red-teaming\07b-cloud-foundry
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
    ```
 
 2. **Open `.env`** and fill in:
@@ -516,31 +532,64 @@ top-level keys so you can navigate whatever you have.)
 
 ## Running the lab
 
+Start anywhere inside this Git clone, not its parent directory.
+Use the `.venv` in **this lab folder**, separate from the root Agent Framework
+environment and 07a's pinned PyRIT environment.
+Quote `"azure-ai-evaluation[redteam]"` so that Mac zsh does not treat the
+extra as a filename pattern.
+
+### macOS Terminal setup
+
 ```bash
-# 1. cd into this folder
+cd "$(git rev-parse --show-toplevel)"
 cd 07-red-teaming/07b-cloud-foundry
-
-# 2. Make a venv and install dependencies
-python -m venv .venv
-source .venv/bin/activate            # macOS / Linux
-# OR on Windows:
-.venv\Scripts\activate
-pip install --upgrade pip
-pip install azure-ai-evaluation[redteam] azure-identity openai python-dotenv
-
-# 3. Sign in to Azure
+brew list unixodbc >/dev/null 2>&1 || brew install unixodbc
+test -x .venv/bin/python || python3.13 -m venv .venv
+.venv/bin/python -m pip install "azure-ai-evaluation[redteam]" azure-identity openai python-dotenv
+.venv/bin/python -m pip check
+test -f .env || cp .env.example .env
 az login
-
-# 4. Configure .env (one-time)
-cp .env.example .env
-#    then open .env and fill in FOUNDRY_PROJECT_ENDPOINT + AZURE_OPENAI_*
-
-# 5. Run
-python 07b-cloud-foundry.py
 ```
 
-Or in VS Code: open `07b-cloud-foundry.py` and click ▶. The Python
-extension auto-loads `.env`.
+### Windows PowerShell setup
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+Set-Location .\07-red-teaming\07b-cloud-foundry
+if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+.\.venv\Scripts\python.exe -m pip install "azure-ai-evaluation[redteam]" azure-identity openai python-dotenv
+.\.venv\Scripts\python.exe -m pip check
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+az login
+```
+
+Edit and save `.env` with `FOUNDRY_PROJECT_ENDPOINT`,
+`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT` and
+`AZURE_OPENAI_API_VERSION`. `REDTEAM_OUTPUT_PATH` defaults to
+`acmebot_redteam_results.json`. Existing values are preserved.
+
+### Run on macOS
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+cd 07-red-teaming/07b-cloud-foundry
+.venv/bin/python -X utf8 07b-cloud-foundry.py
+```
+
+### Run on Windows PowerShell
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+Set-Location .\07-red-teaming\07b-cloud-foundry
+.\.venv\Scripts\python.exe -X utf8 .\07b-cloud-foundry.py
+```
+
+These commands put relative output paths in this lab's folder. For the same
+location in VS Code, use this directory as the working directory and select
+**this folder's** `.venv`. The script itself loads its sibling `.env`.
+Running the scan uses Azure services and quota and can upload results to the
+configured project. Installation and live execution on Mac and Windows
+remain unverified.
 
 The scan prints `"Running scan (this will take ~2–4 minutes)..."` and
 then *blocks* with no further output until the entire cloud-side
@@ -762,12 +811,12 @@ hard cases worth manual review.
 
 | Symptom                                                                                  | Cause                                                                                                              | Fix                                                                                                                                                                            |
 | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `RuntimeError: FOUNDRY_PROJECT_ENDPOINT is not configured`                               | `.env` missing or has `<YOUR_…>` placeholder.                                                                       | `cp .env.example .env` and fill in.                                                                                                                                              |
+| `RuntimeError: FOUNDRY_PROJECT_ENDPOINT is not configured` | `.env` is missing or still contains a placeholder. | Follow the configuration steps under Prerequisites for your platform. Preserve an existing `.env` and fill in the required values. |
 | `Forbidden 403` / `AuthorizationFailed` early in the scan                                 | Your identity lacks `Azure AI User` on the Foundry project.                                                         | See [Step 2 of the Prerequisites](#step-2--grant-yourself-the-azure-ai-user-role).                                                                                              |
 | Scan completes but the portal shows no row                                                | Either RBAC on the portal differs from the SDK identity, or the scan ran against a different project endpoint.      | Verify `FOUNDRY_PROJECT_ENDPOINT` in `.env` matches the project URL in the portal exactly.                                                                                       |
 | Scan hangs at "Running scan..." for > 10 minutes                                          | Foundry is rate-limiting the simulator or judge.                                                                    | Kill the script. Wait 5 minutes. Reduce `num_objectives` and rerun.                                                                                                              |
 | Local AcmeBot calls return 429                                                            | Your AOAI deployment's TPM is exhausted under the burst.                                                            | Bump the deployment's TPM, OR reduce `num_objectives` to 1, OR add `await asyncio.sleep(0.5)` inside `acmebot_callback`.                                                          |
-| `ModuleNotFoundError: azure.ai.evaluation.red_team`                                        | The `[redteam]` extra wasn't installed.                                                                             | Reinstall with `pip install azure-ai-evaluation[redteam]` (note the `[redteam]` extra).                                                                                          |
+| `ModuleNotFoundError: azure.ai.evaluation.red_team` | The extra is missing from this lab's environment, or another interpreter is selected. | Repeat the platform setup block in Running the lab with the quoted `"azure-ai-evaluation[redteam]"` extra, then use this lab's explicit `.venv` interpreter. |
 | `result.attack_success_rate` raises `AttributeError`                                       | The result-object schema differs across SDK minor versions. The lab reads the JSON file instead for portability.    | Read `OUTPUT_PATH` directly — that's what the lab does in Section 8.                                                                                                             |
 | Empty `attack_details` array in the JSON                                                  | The scan completed but all attacks failed to be judged (network or quota error mid-scan).                            | Check the JSON's `environment` or `errors` field. Often the AOAI deployment is the bottleneck — confirm it's reachable.                                                            |
 

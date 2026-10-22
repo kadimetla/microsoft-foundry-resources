@@ -1,138 +1,116 @@
-# Sample 01 · Your first Microsoft Foundry agent
+# Sample 01: Your first Microsoft Foundry agent
 
-> **What this lab teaches.** You will build the smallest possible
-> Microsoft Foundry agent — a single Python file that connects to your
-> Foundry project, sends one prompt to **gpt-4o**, streams the response back
-> to the terminal, and tears everything down cleanly. By the end you will
-> understand the **four building blocks** that every Foundry agent has, and
-> you will know exactly which line of code is responsible for each one.
+This sample sends a prompt to a model deployed in a Microsoft Foundry project
+and prints the response as it streams. The agent is defined in Python. Running
+the sample does not create a saved agent in the Foundry portal.
 
-**Time to complete:** 10 minutes (after prerequisites are met)
-**Difficulty:** ⭐ Beginner — no prior agent experience required
-**Lines of code:** 81
-
----
+**Estimated time:** 10 minutes after setup.
+**Difficulty:** Beginner.
 
 ## Table of contents
 
-- [What you will learn](#what-you-will-learn)
-- [Prerequisites](#prerequisites)
-- [The mental model](#the-mental-model)
-- [Step-by-step code walkthrough](#step-by-step-code-walkthrough)
-- [Running the sample](#running-the-sample)
-- [Expected output](#expected-output)
-- [Troubleshooting](#troubleshooting)
-- [Exercises, try these next](#exercises-try-these-next)
-- [What you've learned](#what-youve-learned)
-- [Where to go next](#where-to-go-next)
-
----
+* [What you will learn](#what-you-will-learn)
+* [Prerequisites](#prerequisites)
+* [The mental model](#the-mental-model)
+* [Step by step code walkthrough](#step-by-step-code-walkthrough)
+* [Running the sample](#running-the-sample)
+* [Expected output](#expected-output)
+* [Troubleshooting](#troubleshooting)
+* [Exercises, try these next](#exercises-try-these-next)
+* [What you've learned](#what-youve-learned)
+* [Where to go next](#where-to-go-next)
+* [Microsoft references](#microsoft-references)
 
 ## What you will learn
 
-By the end of this lab you will be able to:
-
-1. **Explain the four building blocks** of every Microsoft Foundry agent: a
-   *credential*, a *client*, an *agent*, and a *session*.
-2. **Authenticate to Azure from Python code** using `AzureCliCredential`
-   without ever embedding a secret in your source.
-3. **Send a prompt and stream a response** from a Foundry-hosted gpt-4o
-   model.
-
----
+1. Use a credential, a model client, an agent and a session together.
+2. Authenticate with `AzureCliCredential` using your Azure CLI login.
+3. Send prompts to a deployed model and print streamed responses.
 
 ## Prerequisites
 
-| Requirement                                                                                                        | Why                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Python 3.10+**                                                                                                   | The Agent Framework uses modern `async` features.                                                                                                  |
-| **A Microsoft Foundry project** with a **gpt-4o** model deployment                                                 | The agent's "brain". Create one at [ai.azure.com](https://ai.azure.com); see the [Foundry quickstart](https://learn.microsoft.com/azure/ai-foundry/quickstarts/get-started-code). |
-| **Azure CLI** (`az`) signed in: `az login`                                                                         | `AzureCliCredential` picks up your CLI login as a credential source. No secrets in code.                                                       |
-| **A configured `.env` file in this folder**                                                                        | Holds your project endpoint and model name. See [Step 1 below](#step-1--configure-your-env-file).                                                  |
-| **VS Code** with the **Python** and **Azure Tools** extensions (recommended)                                       | You can click ▶ **Run Python File** in the editor and watch the streamed response in the integrated terminal. The Python extension auto-loads `.env`. |
+| Requirement | Details |
+| --- | --- |
+| **Python 3.13** | The setup commands below use this version. |
+| **Git and the complete repository clone** | The commands use Git to find the repository root. The script also imports the shared helper from that root. |
+| **A Microsoft Foundry project with a deployed model** | Use a model that supports the Foundry Responses API. The default deployment name is `gpt-4o`. |
+| **Azure CLI** | Sign in with `az login` using an identity that can access the project and model. |
+| **Project access** | Your identity needs project and model inference permissions, such as **Foundry User** at project scope or equivalent permissions. This role was previously named **Azure AI User**. |
+| **Project endpoint and deployment name** | Configure them as described [below](#step-1-configure-your-env-file). |
+| **VS Code with the Python extension** | Optional. Select the repository virtual environment before running the script. |
 
-### Step 1 — Configure your `.env` file
+Signing in with `az login` does not grant project access. Ask a project
+administrator to check your role assignment if access has not been granted.
+Microsoft's [resource setup guide](https://learn.microsoft.com/en-us/azure/foundry/tutorials/quickstart-create-foundry-resources?tabs=portal)
+covers project creation, model deployment and access assignments.
 
-This sample reads its configuration from a `.env` file **in this folder**.
-You'll do this exactly once per lab; both VS Code's ▶ *Run Python File*
-button and `python 01-basic-agent.py` from the terminal pick up the same
-file automatically.
+### Step 1: Configure your `.env` file
 
-1. **Copy the example to a real `.env`:**
+The script loads `.env` from the same folder as `01-basic-agent.py`, regardless
+of the terminal directory. The terminal commands and VS Code's **Run Python
+File** command therefore use the same file.
+
+1. **Create `.env` only if it is missing. Preserve existing values:**
    ```bash
+   cd "$(git rev-parse --show-toplevel)"
    cd 01-basic-agent
-   cp .env.example .env
+   test -f .env || cp .env.example .env
+   ```
+
+   In Windows PowerShell, use:
+   ```powershell
+   Set-Location -LiteralPath (git rev-parse --show-toplevel)
+   Set-Location 01-basic-agent
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
    ```
 
 2. **Open `.env` in VS Code** and fill in two values:
 
-   | Variable                    | Where to find it                                                                                                                       |
-   | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-   | `FOUNDRY_PROJECT_ENDPOINT`  | Foundry portal → **your project → Overview**. Copy the **project endpoint URL** (ends in `/api/projects/<project-name>`).               |
-   | `FOUNDRY_MODEL`             | The **deployment name** (not the model family) of a chat model in your project. Defaults to `gpt-4o`. Find it under **Models + Endpoints**. |
+   | Variable | Where to find it |
+   | --- | --- |
+   | `FOUNDRY_PROJECT_ENDPOINT` | In the new Foundry portal, select your project and copy the project endpoint from its welcome screen. Its format is `https://<resource>.services.ai.azure.com/api/projects/<project-name>`. |
+   | `FOUNDRY_MODEL` | Select **Build > Models** in the new Foundry portal and copy the deployment name. Use that name, not just the model family. If the variable is unset, the script uses `gpt-4o`. |
 
-> **Security.** `.env` is **gitignored** at the repo root — your endpoint
-> won't be committed. Never put credentials, function keys, or connection
-> strings in source-tracked files.
+These directions refer to the new Foundry portal. Older portal instructions
+may refer to **Models + Endpoints** instead.
 
-> **What if `.env` is missing or has placeholders?** The script **fails
-> fast** with a clear error message pointing back here. You won't silently
-> hit a confusing 404 against the wrong endpoint.
+The repository ignores `.env` files. Keep credentials, function keys and
+connection strings out of tracked files.
 
----
+Existing process environment variables take precedence over values in `.env`.
+The file is not required if the needed values are already set in the environment.
+If editing `.env` appears to have no effect, check for existing variables in
+your terminal.
+
+Before making a request, the shared helper rejects an empty project endpoint
+or one that still contains `<`. It does not validate the full URL or check
+whether the project and model deployment exist.
 
 ## The mental model
 
-Before reading any code, picture the runtime:
+```text
+Your Python process                         Azure
 
-```
-   ┌──────────────────────────────────┐
-   │  Your laptop (Python process)    │
-   │                                  │
-   │   ┌────────────────────────┐     │
-   │   │  AzureCliCredential    │ ──── reads your `az login` token ──┐
-   │   └────────────────────────┘     │                              │
-   │             │                    │                              ▼
-   │             ▼                    │             ┌────────────────────────┐
-   │   ┌────────────────────────┐     │    HTTPS    │ Microsoft Entra ID     │
-   │   │  FoundryChatClient     │ ────┼────────────►│ (mints access tokens)  │
-   │   │  (HTTP transport)      │     │             └────────────────────────┘
-   │   └────────────────────────┘     │                          │
-   │             │                    │                          │
-   │             ▼                    │             ┌────────────────────────┐
-   │   ┌────────────────────────┐     │    HTTPS    │ Microsoft Foundry      │
-   │   │  Agent                 │ ────┼────────────►│ project (gpt-4o)       │
-   │   │   • instructions       │     │             │   • model deployment   │
-   │   │   • tools=None         │     │             │   • session storage    │
-   │   └────────────────────────┘     │             └────────────────────────┘
-   │             │                    │
-   │             ▼                    │
-   │   ┌────────────────────────────┐ │
-   │   │ agent.run(..., stream=True)│ │
-   │   │  ◄── async iterator ──┘    │ │
-   │   │  prints text as it         │ │
-   │   │  arrives from the model    │ │
-   │   └────────────────────────────┘ │
-   └──────────────────────────────────┘
+AzureCliCredential -----------------------> Microsoft Entra ID
+Agent -> FoundryChatClient ----------------> Foundry project
+  instructions                                deployed model
+  shared session
+  print_stream <--------------------------- response updates
 ```
 
-**The four building blocks** highlighted above are the same four you'll see
-in *every* Foundry agent you ever write, no matter how complex. Get
-comfortable with them here and the rest of the workshop is a rearrangement.
+| Part | Class or function | Responsibility |
+| --- | --- | --- |
+| **Credential** | `AzureCliCredential()` | Obtains access tokens using your Azure CLI login. |
+| **Client** | `FoundryChatClient(...)` | Sends model requests to the Foundry project Responses endpoint. |
+| **Agent** | `Agent(...)` | Combines the client, instructions, tools and request options. |
+| **Session** | `agent.create_session()` | Tracks conversation state so later prompts can use earlier turns. |
 
-| Building block            | Class / function           | Responsibility                                                                                       |
-| ------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Credential**            | `AzureCliCredential()`     | Talks to Microsoft Entra ID to get a fresh access token using your `az login` session.               |
-| **Client**                | `FoundryChatClient(...)`   | Knows the HTTP wire protocol for the Microsoft Foundry project endpoint.                              |
-| **Agent**                 | `Agent(...)`               | Composes the model, the instructions, the tools, and the per-call settings into one logical agent.   |
-| **Session**               | `agent.create_session()`   | Holds the conversation history (messages) so the model can answer follow-ups in context.             |
+The session can hold local history or a service conversation identifier,
+depending on how the client and history provider manage the conversation.
 
----
+## Step by step code walkthrough
 
-## Step-by-step code walkthrough
-
-Open [`01-basic-agent.py`](01-basic-agent.py) side-by-side with this guide.
-We'll walk through every section.
+Open [`01-basic-agent.py`](01-basic-agent.py) alongside this guide.
 
 ### Section 1, Imports and `.env` loader
 
@@ -150,38 +128,31 @@ from azure.identity import AzureCliCredential
 load_dotenv(Path(__file__).resolve().parent / ".env")
 ```
 
+The script also resolves the repository root and imports `configure_console`,
+`print_stream` and `project_endpoint` from [`_workshop.py`](../_workshop.py).
+Keep the cloned repository together rather than copying only the entry script.
+
 **What each import is for:**
 
-| Import                                                | Purpose                                                                                                                                     |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `asyncio`                                             | The Agent Framework is async-first. We use `asyncio.run(main())` at the bottom of the file to launch the event loop.                        |
-| `os`                                                  | Read configuration from environment variables.                                                                                              |
-| `from pathlib import Path`                            | Build a robust filesystem path to `.env` next to *this* file (not the user's current working directory).                                     |
-| `from dotenv import load_dotenv`                      | Read a `.env` file and inject its key=value pairs into `os.environ`. The Agent Framework does not auto-load `.env`, so this call is required when you want one.|
-| `from agent_framework import Agent`                   | `Agent` is the Agent Framework's high-level abstraction over "an LLM with instructions and (optionally) tools". This is the *agent*.        |
-| `from agent_framework_foundry import FoundryChatClient` | The transport. This turns method calls into HTTPS requests against your Foundry project endpoint. |
-| `from azure.identity import AzureCliCredential`       | Reuses your `az login` session to mint Entra ID access tokens. No secrets in source. |
-| `load_dotenv(Path(__file__).resolve().parent / ".env")` | Load `.env` from **the same folder as this `.py` file**, no matter where you ran Python from. This is the line that makes `cd anywhere; python /full/path/to/01-basic-agent.py` still work. |
+| Import or call | Purpose |
+| --- | --- |
+| `asyncio` | Runs the `main()` coroutine through `asyncio.run(main())`. |
+| `os` | Reads environment variables. |
+| `Path` | Locates `.env` relative to the script rather than the terminal directory. |
+| `load_dotenv(...)` | Loads the sample configuration without replacing existing process environment variables. |
+| `Agent` | Combines model access, instructions and optional tools. |
+| `FoundryChatClient` | Connects to the model through the Foundry project endpoint. |
+| `AzureCliCredential` | Authenticates using your Azure CLI login. |
 
-> **Deep dive, why two import packages for "the framework"?** The Agent
-> Framework is built in *layers*. `agent_framework` is the **core** package
-> (provider-agnostic abstractions like `Agent`, `BaseAgent`, `FunctionTool`).
-> `agent_framework_foundry` is one of several **provider packages**
-> (Microsoft Foundry, OpenAI, Anthropic, Ollama, and more). Swapping providers is a
-> one-line change at the client level, the `Agent` above doesn't move.
+`agent_framework` contains the shared agent interfaces.
+`agent_framework_foundry` supplies the Foundry integration. Other providers
+have their own client packages and configuration requirements.
 
-### Section 2, Configuration constants and fail-fast check
+### Section 2, Configuration constants and endpoint check
 
 ```python
-ENDPOINT = os.environ.get("FOUNDRY_PROJECT_ENDPOINT", "")
+ENDPOINT = project_endpoint()
 MODEL_DEPLOYMENT_NAME = os.environ.get("FOUNDRY_MODEL", "gpt-4o")
-
-if not ENDPOINT or "<YOUR_" in ENDPOINT:
-    raise RuntimeError(
-        "FOUNDRY_PROJECT_ENDPOINT is not configured. "
-        "Copy .env.example to .env in this folder and fill in your Foundry "
-        "project endpoint. See README.md → Prerequisites."
-    )
 
 AGENT_NAME = "ai-agent"
 AGENT_INSTRUCTIONS = "You are a helpful AI assistant."
@@ -191,89 +162,81 @@ USER_INPUTS = [
 ]
 ```
 
-| Constant                    | What goes here                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENDPOINT`                  | The **project endpoint** of your Foundry project. Read from the `FOUNDRY_PROJECT_ENDPOINT` env var (which `load_dotenv` populated from `.env`). Format: `https://<RESOURCE>.services.ai.azure.com/api/projects/<PROJECT>`.                                                                                                                                                                                                                                                                                                  |
-| `MODEL_DEPLOYMENT_NAME`     | The name of a model **deployment** inside your project. Note: the *deployment name* you gave it, not necessarily the model family (`gpt-4o`, `gpt-4o-mini`). Defaults to `"gpt-4o"` when `FOUNDRY_MODEL` isn't set in `.env`.                                                                                                                                                                                                                                                                                                |
-| `AGENT_NAME`                | A label for the agent. Shows up in tracing and in the Foundry portal's Agents panel while the agent exists.                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `AGENT_INSTRUCTIONS`        | The **system prompt** — the only piece of writing you control that the model always sees. Spend time on it in production.                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `USER_INPUTS`               | A list of prompts to send sequentially. We use a list (not a single string) to make the loop further down trivially extensible — try adding a second prompt to see what happens.                                                                                                                                                                                                                                                                                                                                          |
+| Constant | Value |
+| --- | --- |
+| `ENDPOINT` | The project endpoint from `FOUNDRY_PROJECT_ENDPOINT`, with surrounding whitespace removed. |
+| `MODEL_DEPLOYMENT_NAME` | The deployment name from `FOUNDRY_MODEL`. Defaults to `gpt-4o` when the variable is unset. |
+| `AGENT_NAME` | A local label for the framework and telemetry. It does not register a portal agent. |
+| `AGENT_INSTRUCTIONS` | Instructions included with model requests. |
+| `USER_INPUTS` | Prompts sent in order using the same session. |
 
-> **Deep dive, the fail-fast check.** When `FOUNDRY_PROJECT_ENDPOINT` is
-> unset or still contains the placeholder string `<YOUR_`, we raise a
-> `RuntimeError` **before** opening any HTTP connection. This turns a
-> confusing 404 into a one-line error that points you straight at the fix.
-> The pattern is repeated in samples 03 and 04, and is worth copying into
-> any production script that depends on env vars.
+`project_endpoint()` raises `RuntimeError` if the resolved endpoint is empty,
+contains only whitespace or contains `<`. This happens before any HTTP
+request. A nonempty but incorrect URL can still fail later, as can an
+incorrect deployment name.
 
 ### Section 3, The `main()` coroutine
 
-This is where the actual work happens. Let's break it into three logical parts.
+The coroutine creates the client and agent, sends the prompts and closes
+the client resources.
 
 #### Part 3a, Build the client and agent
 
 ```python
 async def main() -> None:
+    configure_console()
     client = FoundryChatClient(
         project_endpoint=ENDPOINT,
         model=MODEL_DEPLOYMENT_NAME,
         credential=AzureCliCredential(),
     )
 
-    agent = Agent(
+    async with Agent(
         client=client,
         name=AGENT_NAME,
         instructions=AGENT_INSTRUCTIONS,
-    )
+    ) as agent:
+        ...
 ```
 
-Three objects, three responsibilities:
+`AzureCliCredential()` obtains a token when the client needs to authenticate.
+The client receives the endpoint, deployment name and credential explicitly.
+It can also read `FOUNDRY_PROJECT_ENDPOINT` and `FOUNDRY_MODEL` from the
+environment when those arguments are omitted.
 
-1. **`AzureCliCredential()`** mints Entra ID access tokens from your `az login` session. The token is fetched lazily on the first request.
-2. **`FoundryChatClient(...)`** is the HTTP transport. The interesting kwargs:
-
-   | kwarg                | Meaning                                                                                                  |
-   | -------------------- | -------------------------------------------------------------------------------------------------------- |
-   | `project_endpoint`   | Where to send requests. Also readable from `FOUNDRY_PROJECT_ENDPOINT`.                                   |
-   | `model`              | The deployment name in your project. Also readable from `FOUNDRY_MODEL`.                                 |
-   | `credential`         | The credential used to mint tokens for every HTTP request that needs auth.                               |
-
-3. **`Agent(...)`** wraps the client. The agent is constructed *with* `client=...` rather than inheriting from the client. The Agent Framework uses composition, not inheritance: any class implementing the `ChatClient` protocol can power any `Agent`. We do not pass `tools=` here, so the agent can only talk. Tools come in samples 02 and 03.
+`Agent(...)` uses the client to generate responses. No tools are configured
+in this sample. Samples 02 and 03 add tools.
 
 #### Part 3b, Create a session and send each prompt
 
 ```python
-    session = agent.create_session()
+        session = agent.create_session()
 
-    for user_input in USER_INPUTS:
-        print(f"\n# User: '{user_input}'")
-        async for chunk in agent.run(user_input, session=session, stream=True):
-            if chunk.text:
-                print(chunk.text, end="", flush=True)
-        print("")
+        for user_input in USER_INPUTS:
+            print(f"\n# User: '{user_input}'")
+            await print_stream(agent.run(user_input, session=session, stream=True))
+            print()
 ```
 
-There are **three concepts** worth pausing on here.
+**Sessions retain conversation context.**
+`agent.create_session()` creates a session before the loop so all prompts
+share conversation state. Depending on the client and history configuration,
+the session can contain history in its state or track a service conversation
+identifier. It does not necessarily store every message locally.
+Creating a fresh session for each prompt starts a separate conversation.
 
-**Concept 1, Sessions carry conversation memory.**
-`agent.create_session()` allocates a *session*: a container that stores every
-message in the conversation. We create it **outside** the `for` loop so all
-prompts go into the same conversation. When you create a fresh session per
-prompt the model forgets prior turns, useful for stateless QA, but not what we
-want here.
+**Streaming updates can append or replace text.**
+`agent.run(..., stream=True)` returns a `ResponseStream` of
+`AgentResponseUpdate` objects. A final update can repeat the complete answer.
+Printing every `chunk.text` verbatim would duplicate that answer.
+`print_stream` respects append and replacement semantics, tracks distinct
+message parts, obtains the final response and closes the stream.
 
-**Concept 2, `agent.run(..., stream=True)` returns an async iterator of *chunks*.**
-The model streams its response token-by-token. Each `chunk` is a small
-`AgentResponseUpdate` object. `chunk.text` holds the new text fragment
-since the last chunk (often a single word or a fragment of one). We
-`print(chunk.text, end="", flush=True)` so it appears incrementally, the
-familiar "typewriter" effect.
-
-**Concept 3, Streaming vs blocking.** Drop `stream=True` and call
-`result = await agent.run(user_input, session=session)` for the blocking
-version. You lose the typewriter effect but the code is dramatically
-simpler. **For interactive UIs prefer streaming**, first-token latency feels
-dramatically faster. For batch jobs the blocking call is fine.
+**You can also print a completed response.**
+Omit `stream=True` and call
+`result = await agent.run(user_input, session=session)`, then print
+`result.text`. This still uses asynchronous code, but returns the complete
+response instead of a stream of updates.
 
 #### Part 3c, Print a completion banner
 
@@ -281,13 +244,10 @@ dramatically faster. For batch jobs the blocking call is fine.
     print("\n--- All tasks completed successfully ---")
 ```
 
-The `FoundryChatClient` and `AzureCliCredential` do not own per-run
-server-side resources, so there is no async context manager to close in this
-sample. When you start using hosted-agent sessions (sample 02b) or other
-features that allocate server-side state, you'll wrap the client in `async
-with` to guarantee teardown.
+The `async with Agent(...)` block closes the owned client resources.
+Closing a client is not the same as deleting a registered agent or its versions.
 
-### Section 4, The entry-point guard
+### Section 4, The entry point
 
 ```python
 if __name__ == "__main__":
@@ -295,142 +255,139 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        import traceback
-        traceback.print_exc()
+        raise SystemExit(130)
     finally:
         print("Program finished.")
 ```
 
-Standard Python defensive boilerplate. The interesting line is
-`asyncio.run(main())`, which:
+`asyncio.run(main())` creates an event loop, runs the coroutine and closes
+the loop. Unexpected errors propagate with a traceback and a nonzero exit
+status. An interruption exits with status `130`.
 
-1. Creates a fresh event loop,
-2. Runs `main()` to completion,
-3. Closes the loop deterministically.
-
-`asyncio.run` is the correct way to launch top-level async code in Python
-3.7+. Don't reach for `loop = asyncio.get_event_loop()` patterns you might
-have seen in older blog posts; those are deprecated.
-
----
+`Program finished.` is printed when this `finally` block runs, including
+when `main()` fails. It is not a success indicator. The success banner is
+printed only after all prompts complete and the agent context closes.
 
 ## Running the sample
 
-### Option A · From the VS Code integrated terminal (recommended)
+Run the complete command block after configuring `.env` above. With Git
+installed, the first command returns to the repository root from any folder
+inside the clone, including `01-basic-agent`. Keep the complete repository
+together because these samples import the shared `_workshop.py`.
 
-1. **Open this folder in VS Code:**
-   ```bash
-   code 01-basic-agent
-   ```
-2. **Open a new terminal:** `Terminal → New Terminal` (or `` Ctrl+` `` / `` Cmd+` ``).
-3. **Create a virtual environment and install the framework:**
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate          # macOS / Linux
-   # OR on Windows:
-   .venv\Scripts\activate
-   pip install --upgrade pip
-   pip install agent-framework agent-framework-foundry python-dotenv
-   ```
-4. **Sign in to Azure:**
-   ```bash
-   az login
-   ```
-   This populates the credential cache that `AzureCliCredential` reads.
-5. **Confirm your `.env` is configured** (see [Step 1 of the Prerequisites](#step-1--configure-your-env-file)). The file lives in this folder and must have `FOUNDRY_PROJECT_ENDPOINT` filled in.
-6. **Run it:**
-   ```bash
-   python 01-basic-agent.py
-   ```
+Use one repository `.venv` for samples 01 through 04.
+Install the compatible SDK set from
+[`requirements-first-four.txt`](../requirements-first-four.txt), not an
+unbounded upgrade of individual SDK packages.
 
-### Option B · One click in VS Code
+### Windows PowerShell
 
-With the venv selected as the Python interpreter (`Ctrl+Shift+P` → **Python:
-Select Interpreter**), open `01-basic-agent.py` and click the ▶ **Run Python
-File** button in the editor's top-right corner.
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+.\.venv\Scripts\python.exe -m pip install -r requirements-first-four.txt
+.\.venv\Scripts\python.exe -m pip check
+az login
+.\.venv\Scripts\python.exe -X utf8 .\01-basic-agent\01-basic-agent.py
+```
 
----
+### macOS or Linux with Bash
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+test -x .venv/bin/python || python3.13 -m venv .venv
+.venv/bin/python -m pip install -r requirements-first-four.txt
+.venv/bin/python -m pip check
+az login
+.venv/bin/python -X utf8 01-basic-agent/01-basic-agent.py
+```
+
+These commands do not require virtual environment activation or a PowerShell
+execution policy change. `-X utf8` also makes redirected output predictable.
+
+Installation uses your configured package feed. If downloads from
+`files.pythonhosted.org` time out, check that feed and your network rather
+than adding a public PyPI override.
+
+The sample has previously run on macOS with Python 3.13. Actual Windows
+execution remains unverified.
+
+### VS Code
+
+Open the repository root in VS Code. Use **Python: Select Interpreter** to
+select `.venv/bin/python` on macOS or `.venv\Scripts\python.exe` on Windows.
+Open `01-basic-agent.py` and use **Run Python File**. The script loads `.env`
+from its own sample folder.
 
 ## Expected output
 
-```
+The response wording and the size of each streamed update can vary.
+A run might look like this:
+
+```text
 # User: 'Can you tell me the gravity of Earth versus the gravity of Mars?'
-Sure! Here's a comparison of the gravitational acceleration on Earth and Mars:
-
-- **Earth**: The standard gravitational acceleration is approximately **9.81 m/s²**.
-- **Mars**: The gravitational acceleration is about **3.71 m/s²**.
-
-In simpler terms, the gravity on Mars is about **38%** of that on Earth.
-That's why objects (and people) would weigh much less on Mars compared to
-Earth, and why future Mars explorers might experience that "bouncy" feeling
-in lower gravity.
+Earth's surface gravity is about 9.81 m/s^2. Mars's is about 3.71 m/s^2.
+Mars has about 38% of Earth's surface gravity.
 
 --- All tasks completed successfully ---
 Program finished.
 ```
 
-The text after `# User:` will stream in incrementally — you'll see words
-appear one or two at a time, not all at once. That's `stream=True` doing its
-job.
-
----
+The answer is printed as updates arrive. There is no fixed number of words
+per update. The shared renderer flushes each text update it prints.
 
 ## Troubleshooting
 
-| Symptom                                                                                                       | Cause                                                                                                                      | Fix                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RuntimeError: FOUNDRY_PROJECT_ENDPOINT is not configured`                                                    | You haven't created `.env`, or `.env` still contains the `<YOUR_…>` placeholder.                                            | Follow [Step 1 of the Prerequisites](#step-1--configure-your-env-file): `cp .env.example .env` and fill in the two values.                                                  |
-| `azure.identity.exceptions.CredentialUnavailableError` or `AzureCliCredential failed to retrieve a token` | You haven't signed in to Azure CLI, or you're signed into the wrong tenant.                                                | Run `az login` (optionally `az login --tenant <YOUR_TENANT_ID>`). Verify with `az account show`.                                                                          |
-| `ResourceNotFound` / `404` from the client                                                                    | `FOUNDRY_PROJECT_ENDPOINT` in `.env` is wrong (typo, wrong project, wrong resource).                                       | Open Foundry portal → **your project → Overview**, copy the endpoint URL, paste over the value in `.env`.                                                                  |
-| `DeploymentNotFound` / `404` for the model                                                                    | `FOUNDRY_MODEL` doesn't match any deployment in your project.                                                              | In the Foundry portal → **your project → Models + Endpoints**, copy the exact deployment name into `.env`.                                                                  |
-| Streamed output has no spaces or looks "wrong"                                                                | Some terminals buffer line-by-line. We use `print(..., end="")` which can interact with line buffering.                    | Set `PYTHONUNBUFFERED=1` before running, or pipe through `python -u 01-basic-agent.py`.                                                                                    |
-| `ModuleNotFoundError: agent_framework_foundry` *or* `ModuleNotFoundError: dotenv`                            | Required packages weren't installed in the active venv.                                              | `pip install agent-framework agent-framework-foundry python-dotenv`                                                                                                  |
+| Symptom | Possible cause | What to do |
+| --- | --- | --- |
+| `RuntimeError: FOUNDRY_PROJECT_ENDPOINT is not configured` | The resolved endpoint is empty or still contains `<`. | Follow the guarded copy commands in [Step 1](#step-1-configure-your-env-file), then edit the endpoint without overwriting an existing `.env`. |
+| `azure.identity.exceptions.CredentialUnavailableError` or `AzureCliCredential failed to retrieve a token` | Azure CLI is not signed in or is using the wrong tenant. | Run `az login`, or `az login --tenant <YOUR_TENANT_ID>`. Check the active account with `az account show`. |
+| `403 Forbidden` or a permission error | The identity lacks project or model access. Network restrictions can also deny access. | Confirm the account and tenant with `az account show`. Ask an administrator to check project permissions, such as Foundry User or equivalent access, and any network restrictions. |
+| `ResourceNotFound` or `404` for the project | The endpoint points to the wrong resource or project. | In the new Foundry portal, select your project and copy its endpoint from the welcome screen. Set `FOUNDRY_PROJECT_ENDPOINT` to that value. |
+| `DeploymentNotFound` or `404` for the model | The deployment name does not match an available deployment. | In the new Foundry portal, select **Build > Models** and copy the exact deployment name into `FOUNDRY_MODEL`. |
+| Duplicated or unexpected streamed text | A printing loop may be printing both updates and the complete response. | Keep the shared `print_stream` renderer. It handles replacement snapshots, preserves provider whitespace and flushes each printed text update. |
+| `ModuleNotFoundError` for a dependency | Dependencies are missing or a different Python interpreter is being used. | Repeat the appropriate [setup block](#running-the-sample) from inside the clone. It installs the root `requirements-first-four.txt` using the same `.venv` interpreter that runs the sample. |
+| `.env` changes have no effect | Existing environment variables override values in the file. | Check whether `FOUNDRY_PROJECT_ENDPOINT` or `FOUNDRY_MODEL` is already set in your terminal environment. Update or remove that value before rerunning. |
+| `429` or `Too Many Requests` | The deployment has insufficient request or token quota for the call. | Allow the quota window to reset. If the request still exceeds the allowance, use a deployment with enough capacity. Waiting alone will not fix a request that is too large for the allowance. |
 
----
-
-## Exercises — try these next
+## Exercises, try these next
 
 1. **Change the personality.** Edit `AGENT_INSTRUCTIONS` to say *"You are a
-   pirate who answers in nautical slang."* Re-run. The same model, the same
-   prompt, but a completely different style, your first hands-on lesson in
-   how powerful the system prompt is.
+   pirate who answers in nautical slang."* Run the sample again and compare
+   the wording with the original response.
 2. **Add a second prompt to `USER_INPUTS`** that depends on the first
-   (e.g., *"And what about the Moon?"*). Run it. Observe that the model
-   answers correctly because both prompts share the same `session` and it
-   has the prior turn in context.
+   answer, such as *"Which of those two planets has stronger gravity?"*.
+   Keep the shared session so the second request can use the earlier turn.
 3. **Recreate the session inside the `for` loop** by moving `session =
-   agent.create_session()` *into* the loop. Re-run with the follow-up
-   question above and see that the model *no longer knows what you're
-   referring to*. That's the practical importance of sessions in three lines
-   of code.
-4. **Switch from streaming to blocking.** Replace the `async for chunk …`
-   block with `result = await agent.run(user_input, session=session); print(result)`. You'll
-   lose the typewriter effect but the code is dramatically simpler, and it
-   still works.
-
----
+   agent.create_session()` into the loop. Run both prompts again. The
+   second request now starts without the earlier turn, so the model may
+   ask for clarification or make a guess.
+4. **Print a completed response.** Replace `await print_stream(...)` with
+   `result = await agent.run(user_input, session=session)`, followed by
+   `print(result.text)`. The complete answer is printed after the call
+   finishes rather than as streamed updates.
 
 ## What you've learned
 
-You can now describe a Foundry agent in four words: **credential, client,
-agent, session**. You've signed in to Azure without putting a secret in
-your code. You've streamed tokens from gpt-4o. You've seen the basic
-pattern that every Foundry sample in this workshop uses.
+The sample combines a credential, a model client, an agent and a session.
+It loads configuration from the environment, sends prompts to a deployed
+model and uses the shared renderer to print streamed responses.
 
-Everything from here on is *additive*: tools (samples 02 and 03), tracing
-(sample 04), per-agent identity and downstream API auth (sample 05), and
-building your own MCP server (sample 06).
-
----
+Samples 02 and 03 add tools. Sample 04 adds tracing. Sample 05 covers agent
+identity and downstream API authentication. Sample 06 uses a custom MCP server.
 
 ## Where to go next
 
 | If you want to…                                                                                       | Go to                                                                                  |
 | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Give the agent its first **tool** so it can do more than talk                                         | [Sample 02 · MCP tool agent](../02-mcp-tool-agent/README.md)                            |
-| Define the same agent in the **Foundry portal** instead of in code                                    | [Sample 02b · Portal agent](../02-mcp-tool-agent/README.md#variant-b--02b-portal-agent-portal-first) |
+| Define the same agent in the **Foundry portal** instead of in code                                    | [Sample 02b · Portal agent](../02-mcp-tool-agent/README.md#variant-b--02b-portal-agentpy-portal-first) |
 | Use a **local Python function** as a tool (no MCP server needed)                                      | [Sample 03 · Custom function tool](../03-custom-function-tool-agent/README.md)          |
-| Send all of this to **Application Insights** for queryable traces                                     | [`04-tracing-agent.py`](../04-tracing-agent.py) at the repo root                       |
+| Send all of this to **Application Insights** for queryable traces | [Sample 04, tracing](../04-tracing-agent/README.md) |
 | See the **full workshop arc**                                                                         | [Root README](../README.md#-hands-on-samples--the-learning-arc)                         |
+
+## Microsoft references
+
+* [Foundry model provider and client configuration](https://learn.microsoft.com/en-us/agent-framework/integrations/by-component/model-providers/microsoft-foundry)
+* [Create Foundry resources, deploy a model and grant project access](https://learn.microsoft.com/en-us/azure/foundry/tutorials/quickstart-create-foundry-resources?tabs=portal)
+* [Agent sessions and conversation state](https://learn.microsoft.com/en-us/agent-framework/concepts/agents/conversations/session)

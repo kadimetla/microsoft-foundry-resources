@@ -3,14 +3,14 @@
 > **What this lab teaches.** Sample 02 showed an agent calling a
 > *remote* tool over MCP. Here you'll do the opposite extreme: give the
 > agent a **plain Python function** living inside the same script. No
-> server, no JSON-RPC, no network. The model decides when to call it, the
+> additional server or MCP connection. The model still runs in Foundry.
+> The model decides when to call the function, the
 > framework wires up the arguments, and you write business logic the way
 > you always have. By the end you'll understand exactly when to reach for
 > a local function tool vs an MCP server.
 
 **Time to complete:** 15 minutes
 **Difficulty:** ⭐⭐ Intermediate. Assumes you've completed sample 01
-**Lines of code:** 91
 
 ---
 
@@ -54,20 +54,28 @@ By the end of this lab you will be able to:
 | Requirement                                                       | Why                                                                                                           |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | **You've completed sample 01**                                    | The four building blocks (credential, client, agent, thread) are not re-explained here.                       |
-| **Python 3.10+**                                                  | The framework uses modern `async` features.                                                                    |
+| **Python 3.13** | Use the same Python version as the setup instructions and local verification. |
 | **A Microsoft Foundry project** with a **gpt-4o** deployment      | Same as samples 01 and 02.                                                                                     |
 | **Azure CLI signed in** (`az login`)                              | `AzureCliCredential` reads your CLI login.                                                                     |
-| **A configured `.env` file in this folder**                       | Holds your project endpoint and model name. See [Step 1 below](#step-1--configure-your-env-file).              |
-| **VS Code with the Python extension** (recommended)               | Click ▶ to run. The Python extension auto-loads `.env`. Debug breakpoints work inside `get_time()` so you can step into the tool the moment it fires. |
+| **A configured `.env` file in this folder**                       | Holds your project endpoint and model name. See [Step 1 below](#step-1-configure-your-env-file).              |
+| **VS Code with the Python extension** (optional) | Select the sample's virtual environment. The script loads `.env`. Debug breakpoints work inside `get_time()`. |
 
 ### Step 1: Configure your `.env` file
 
 This sample reads configuration from a `.env` file **in this folder**.
 
-1. **Copy the example to a real `.env`:**
+1. **Create `.env` only if it is missing. Preserve existing values:**
    ```bash
+   cd "$(git rev-parse --show-toplevel)"
    cd 03-custom-function-tool-agent
-   cp .env.example .env
+   test -f .env || cp .env.example .env
+   ```
+
+   In Windows PowerShell, use:
+   ```powershell
+   Set-Location -LiteralPath (git rev-parse --show-toplevel)
+   Set-Location 03-custom-function-tool-agent
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
    ```
 
 2. **Open `.env` in VS Code** and fill in:
@@ -183,26 +191,22 @@ from azure.identity import AzureCliCredential
 | `AzureCliCredential`                                | Sync credential that reads your `az login` token. Matches the sync `Agent` constructor in this script.                                                                                 |
 | `from datetime import datetime, timezone`           | Used by our tool function. This is the entire reason `get_time()` works, and a reminder that local function tools can use any Python library you can `pip install`.                    |
 
-> **Note.** `load_dotenv` is called **before** the framework imports so that
-> any framework-level config that reads environment variables at import time
-> sees the values from `.env`. Keep this order in your own scripts.
+> **Note.** Load `.env` before reading configuration values. Resolving its
+> path from `__file__` keeps terminal runs and VS Code on the same settings.
 
-> **Mixing tools.** Want to add an MCP server alongside `get_time`? Import
+The script imports `configure_console`, `print_stream` and `project_endpoint`
+from [`_workshop.py`](../_workshop.py) using the resolved repository root.
+Keep that helper with the cloned sample folders.
+
+> **Mixing tools.** Want to add an MCP server alongside `get_time`? Call
 > `client.get_mcp_tool(...)` (see sample 02) and pass it in the same `tools=[...]`
 > list. The framework treats each entry by type.
 
 ### Section 2 · Configuration and fail-fast check
 
 ```python
-ENDPOINT = os.environ.get("FOUNDRY_PROJECT_ENDPOINT", "")
+ENDPOINT = project_endpoint()
 MODEL = os.environ.get("FOUNDRY_MODEL", "gpt-4o")
-
-if not ENDPOINT or "<YOUR_" in ENDPOINT:
-    raise RuntimeError(
-        "FOUNDRY_PROJECT_ENDPOINT is not configured. "
-        "Copy .env.example to .env in this folder and fill in your Foundry "
-        "project endpoint. See README.md."
-    )
 
 AGENT_NAME = "time-agent"
 AGENT_INSTRUCTIONS = (
@@ -250,14 +254,16 @@ Four lines that do **three jobs**:
    implementation freely without re-introducing the tool.
 
 > **Deep dive · Async vs sync tool functions.** This one is sync. The Agent
-> Framework accepts both. Wrap blocking I/O in `async def` if you want to
-> avoid stalling the event loop. For pure-compute calls like `datetime.now()`,
-> sync is fine.
+> Framework accepts both. Use an asynchronous client for I/O, or move
+> blocking work to a thread with `asyncio.to_thread()`. Adding `async def`
+> alone does not make blocking code asynchronous. A short call such as
+> `datetime.now()` is fine in this synchronous tool.
 
 ### Section 4 · `main()`: wiring the function as a tool
 
 ```python
 async def main() -> None:
+    configure_console()
     client = FoundryChatClient(
         model=MODEL,
         project_endpoint=ENDPOINT,
@@ -294,37 +300,24 @@ menu.
             print(f"\n# User: '{user_input}'")
             print(f"# {AGENT_NAME}: ", end="", flush=True)
 
-            async for chunk in await agent.run(user_input, stream=True):
-                for content in chunk.contents:
-                    data = content.to_dict()
-                    ctype = data.get("type")
-
-                    if ctype == "text" and data.get("text"):
-                        print(data["text"], end="", flush=True)
-                    elif ctype == "function_call":
-                        print(
-                            f"\n[tool call] {data.get('name')}"
-                            f"({data.get('arguments', '{}')})",
-                            flush=True,
-                        )
-                    elif ctype == "function_result":
-                        print(
-                            f"[tool result] {data.get('result')}\n# {AGENT_NAME}: ",
-                            end="",
-                            flush=True,
-                        )
+            await print_stream(
+                agent.run(user_input, stream=True),
+                show_tools=True,
+                agent_name=AGENT_NAME,
+            )
             print()
 ```
 
-Each streaming chunk is an `AgentResponseUpdate` whose `.contents` list
-carries one or more typed `Content` objects. Calling `.to_dict()` gives you
-a plain dict with a stable `type` discriminator. We branch on three of
-those types:
+Each streaming update contains typed `Content` objects. The shared renderer
+handles three relevant content types. It merges function call fragments by
+`call_id` and displays each completed call and its result once. Text updates
+can append text or replace an earlier snapshot, so printing every update
+verbatim would duplicate the answer.
 
 | Content `type`      | When it appears                                                | What we print                              |
 | ------------------- | -------------------------------------------------------------- | ------------------------------------------ |
-| `text`              | The model is streaming its natural-language answer.            | The token, inline, no newline.             |
-| `function_call`     | The model has decided to call a tool. Name and JSON args.      | `[tool call] get_time({})`                 |
+| `text` | Text deltas or complete replacement snapshots arrive. | Only new text, or an explicit correction label. |
+| `function_call` | The model supplies a tool name and arguments. | Stored until the corresponding result arrives. |
 | `function_result`   | The framework has run the function and is returning its value. | `[tool result] The current UTC time is ...` |
 
 Walk through what happens on a single user prompt:
@@ -334,12 +327,12 @@ Walk through what happens on a single user prompt:
    │  agent.run("What is the current time in UTC?", stream=True)          │
    │                                                                      │
    │   Chunk #1   contents=[function_call(name=get_time, args={})]        │
-   │              prints: [tool call] get_time({})                        │
+   │              records the call and merges its argument fragments     │
    │                                                                      │
    │   (framework invokes get_time(), captures the return value)          │
    │                                                                      │
    │   Chunk #2   contents=[function_result(result="The current UTC...")] │
-   │              prints: [tool result] The current UTC time is ...       │
+   │              prints the completed call, then its result              │
    │                                                                      │
    │   Chunk #3   contents=[text("The")]                                  │
    │   Chunk #4   contents=[text(" current")]                             │
@@ -348,43 +341,56 @@ Walk through what happens on a single user prompt:
    └──────────────────────────────────────────────────────────────────────┘
 ```
 
-The earlier API forced a deep `hasattr` probe into a nested
-`raw_representation.raw_representation.step_details` chain. The current
-framework normalises that into typed content parts, so the branching is a
-plain `if ctype == ...` ladder. The `Content` objects also expose typed
-attributes (`content.call_id`, `content.name`, `content.arguments`) so you
-do not have to round-trip through `to_dict()` if you prefer.
+The helper uses public `Content` attributes such as `call_id`, `name`,
+`arguments` and `merge_mode`. It also obtains the final response and closes
+the stream. Both direct iteration of `agent.run(..., stream=True)` and the
+awaited streaming form are supported by the pinned SDK.
 
 ---
 
 ## Running the sample
 
-```bash
-# 1. cd into this folder
-cd 03-custom-function-tool-agent
+Run the complete command block after configuring `.env` above. With Git
+installed, the first command returns to the repository root from any folder
+inside the clone. Use the same repository `.venv` as samples 01, 02, 04 and 06.
+Install the compatible SDK set from
+[`requirements-first-four.txt`](../requirements-first-four.txt).
 
-# 2. Make a virtual environment and install the framework
-python -m venv .venv
-source .venv/bin/activate         # macOS / Linux
-# OR on Windows:
-.venv\Scripts\activate
-pip install --upgrade pip
-pip install agent-framework agent-framework-foundry python-dotenv
+### Windows PowerShell
 
-# 3. Sign in to Azure
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+.\.venv\Scripts\python.exe -m pip install -r requirements-first-four.txt
+.\.venv\Scripts\python.exe -m pip check
 az login
-
-# 4. Configure .env (one-time)
-cp .env.example .env
-#    then open .env and fill in FOUNDRY_PROJECT_ENDPOINT and FOUNDRY_MODEL
-#    (see Prerequisites → "Step 1 · Configure your .env file")
-
-# 5. Run
-python 03-custom-function-tool-agent.py
+.\.venv\Scripts\python.exe -X utf8 .\03-custom-function-tool-agent\03-custom-function-tool-agent.py
 ```
 
-Or in VS Code: open the file and click ▶ **Run Python File**. The Python
-extension auto-loads `.env` from this folder.
+### macOS or Linux with Bash
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+test -x .venv/bin/python || python3.13 -m venv .venv
+.venv/bin/python -m pip install -r requirements-first-four.txt
+.venv/bin/python -m pip check
+az login
+.venv/bin/python -X utf8 03-custom-function-tool-agent/03-custom-function-tool-agent.py
+```
+
+Activation is optional. Calling the virtual environment Python directly
+avoids PowerShell execution policy issues. In VS Code, open the repository
+root and use **Python: Select Interpreter** to select `.venv/bin/python` on
+macOS or `.venv\Scripts\python.exe` on Windows. Use **Run Python File**.
+The script loads `.env` from its own sample folder.
+
+Unexpected errors exit with a nonzero status. An interruption exits with `130`.
+
+Installation uses your configured package feed. Do not add a public PyPI
+override when downloads from `files.pythonhosted.org` time out.
+
+Dependency installation and offline regression checks have passed on macOS
+with Python 3.13. Windows execution and live Azure runs remain unverified.
 
 ---
 
@@ -403,8 +409,9 @@ Program finished.
 
 You should see **three distinct things** in the output:
 
-1. A `[tool call]` line, emitted when the model decides to call `get_time`.
-   The arguments are `{}` because the function takes none.
+1. A `[tool call]` line showing the completed call when its result arrives.
+   The arguments are `{}` because the function takes none. This is not an
+   execution start timestamp.
 2. A `[tool result]` line, emitted when the framework has executed the
    function and is feeding the return value back to the model.
 3. The **final answer** that incorporates the tool's return value. The
@@ -422,13 +429,14 @@ chose not to call your tool. Tighten the system prompt, for example
 
 | Symptom                                                    | Cause                                                                                                | Fix                                                                                                                                                                |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `RuntimeError: FOUNDRY_PROJECT_ENDPOINT is not configured` | You haven't created `.env`, or `.env` still has the `<YOUR_…>` placeholder.                          | `cp .env.example .env` and fill in the two values. See [Prerequisites → Step 1](#step-1--configure-your-env-file).                                                  |
-| `Tool calls:` line never appears                           | The model decided not to call the tool, usually because the docstring is too vague.                   | Make the docstring more specific. Add a sentence to `AGENT_INSTRUCTIONS` like *"Use the get_time tool for any question about the current time."*                    |
+| `RuntimeError: FOUNDRY_PROJECT_ENDPOINT is not configured` | You haven't created `.env`, or `.env` still has the `<YOUR_…>` placeholder.                          | `cp .env.example .env` and fill in the two values. See [Prerequisites → Step 1](#step-1-configure-your-env-file).                                                  |
+| `[tool call]` line never appears | The model did not call the tool, or execution failed before a result arrived. | Check the error output and keep the instruction to use `get_time` for current time questions. |
 | `TypeError: get_time() takes 0 positional arguments but 1 was given` | You added an argument to `get_time` but didn't update the type hint, and the model passed an unexpected payload. | Add a typed argument: `def get_time(timezone: str = "UTC") -> str`, and update the docstring. The model's tool-call args will line up.                              |
 | `CredentialUnavailableError`                                | Not signed in to Azure CLI.                                                                          | `az login` (optionally `az login --tenant <YOUR_TENANT_ID>`).                                                                                                       |
-| `'Agent' object has no attribute 'run_stream'`               | Old API usage. The current `Agent` accepts streaming via `await agent.run(input, stream=True)`.       | Update the call site to `async for chunk in await agent.run(user_input, stream=True):`.                                                                              |
+| `'Agent' object has no attribute 'run_stream'` | Old API usage. | Use `await print_stream(agent.run(user_input, stream=True), show_tools=True, agent_name=AGENT_NAME)`. |
 | `DeploymentNotFound` / `404`                                | `MODEL_DEPLOYMENT_NAME` is wrong.                                                                    | Check the Foundry portal → **Models + Endpoints** for the exact name.                                                                                                |
 | Tool runs but the model ignores the result                  | The function returns something the model can't usefully interpret (e.g., a complex object).           | Return a **clear, human-readable string**. The model "sees" the return value as text. Avoid returning huge JSON blobs unless you also instruct the model how to parse them. |
+| `429` or `Too Many Requests` | The deployment quota is too small for the request or the full tool exchange. | Allow the quota window to reset or use an appropriately sized deployment. A tool round trip requires more than one model call. |
 
 ---
 
@@ -481,7 +489,7 @@ authentication on MCP is a wrapper around the MCP tool object returned by
 
 | If you want to…                                                                          | Go to                                                                  |
 | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Add **OpenTelemetry tracing** so you can query tool-call latency and arguments in KQL    | [`04-tracing-agent.py`](../04-tracing-agent.py) at the repo root        |
+| Add **OpenTelemetry tracing** so you can query tool latency and optional captured arguments | [Sample 04, tracing](../04-tracing-agent/README.md) |
 | **Build your own MCP server** and have a Foundry agent call its tools                    | [Sample 06 · Weather MCP agent](../06-weather-mcp-agent/README.md)      |
 | Give the agent **its own Entra identity** and call an authenticated downstream API       | [Sample 05 · End-to-end with Entra Agent ID](../05-end-to-end-agent/)   |
 | See the **full workshop arc**                                                            | [Root README](../README.md#-hands-on-samples--the-learning-arc)          |

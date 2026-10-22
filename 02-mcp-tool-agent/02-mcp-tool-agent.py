@@ -1,12 +1,65 @@
-r"""Build an MCP-enabled Agent using Microsoft Agent Framework v1.6+ (GA)
+r"""Build an MCP enabled agent using Microsoft Agent Framework.
 
-# Run this python script
-> python -m venv demos
-> source demos/bin/activate     # macOS / Linux
-> demos\Scripts\activate        # Windows
-> pip install agent-framework agent-framework-foundry azure-monitor-opentelemetry python-dotenv
-> az login                      # FoundryChatClient uses your Azure CLI credentials
-> python 02-mcp-tool-agent.py
+Prerequisites: Python 3.13, Git, Azure CLI, a Foundry project with a
+deployed model and network access to the Microsoft Learn MCP service.
+Keep the complete repository together.
+
+1. Setup
+
+Run from any folder INSIDE this Git clone. The first command returns to
+the repository root. Reuse the same .venv as samples 01, 03 and 04.
+Activation is not required.
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    test -x .venv/bin/python || python3.13 -m venv .venv
+    .venv/bin/python -m pip install -r requirements-first-four.txt
+    .venv/bin/python -m pip check
+    az login
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+    .\.venv\Scripts\python.exe -m pip install -r requirements-first-four.txt
+    .\.venv\Scripts\python.exe -m pip check
+    az login
+
+2. Configure
+
+From the repository root, create .env only if it is missing.
+Do not overwrite an existing configuration.
+
+macOS Terminal:
+    test -f 02-mcp-tool-agent/.env || cp 02-mcp-tool-agent/.env.example 02-mcp-tool-agent/.env
+
+Windows PowerShell:
+    if (-not (Test-Path .\02-mcp-tool-agent\.env)) { Copy-Item .\02-mcp-tool-agent\.env.example .\02-mcp-tool-agent\.env }
+
+Edit 02-mcp-tool-agent/.env and set:
+    FOUNDRY_PROJECT_ENDPOINT: your Foundry project endpoint
+    FOUNDRY_MODEL: the name of your deployed model
+APPLICATIONINSIGHTS_CONNECTION_STRING is optional for this sample.
+Use an Azure identity with access to the project and model.
+
+3. Run after saving .env
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    .venv/bin/python -X utf8 02-mcp-tool-agent/02-mcp-tool-agent.py
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    .\.venv\Scripts\python.exe -X utf8 .\02-mcp-tool-agent\02-mcp-tool-agent.py
+
+4. VS Code
+
+Open the repository root and use Python: Select Interpreter to choose
+.venv/bin/python on Mac or .venv\Scripts\python.exe on Windows.
+Open this file and select Run Python File. Its own folder supplies .env.
+
+Expected result: a completed answer using the Microsoft Learn MCP tool.
+Live execution of this sample and Windows execution remain unverified.
+See README.md for endpoint configuration and tracing details.
 """
 
 import asyncio
@@ -21,15 +74,12 @@ from agent_framework import Agent
 from agent_framework.foundry import FoundryChatClient
 from azure.identity import AzureCliCredential
 
-from _observability import init_observability
+from _observability import init_observability, project_endpoint, shutdown_tracing
 
 # Microsoft Foundry project configuration.
 # Set FOUNDRY_PROJECT_ENDPOINT in .env (see .env.example).
 # Format: https://<resource>.services.ai.azure.com/api/projects/<project-name>
-PROJECT_ENDPOINT = os.environ.get(
-    "FOUNDRY_PROJECT_ENDPOINT",
-    "https://<YOUR_FOUNDRY_RESOURCE>.services.ai.azure.com/api/projects/<YOUR_PROJECT_NAME>",
-)
+PROJECT_ENDPOINT = project_endpoint()
 MODEL = os.environ.get("FOUNDRY_MODEL", "gpt-4o")
 
 AGENT_NAME = "mcp-learn-agent-codefirst"
@@ -70,17 +120,14 @@ async def main() -> None:
             result = await agent.run(user_input)
             print(f"# {AGENT_NAME}: {result}\n")
 
-        print("\n--- All tasks completed successfully ---")
-
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        import traceback
-        traceback.print_exc()
+        raise SystemExit(130)
     finally:
-        print("Program finished.")
+        shutdown_tracing()
+    print("\n--- All tasks completed successfully ---")
+    print("Program finished.")

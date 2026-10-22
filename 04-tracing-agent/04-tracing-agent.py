@@ -1,19 +1,72 @@
-"""Build an agent wired up with OpenTelemetry tracing (sample 04).
+r"""Build an agent wired up with OpenTelemetry tracing (sample 04).
 
-Run this script
----------------
-> python -m venv .venv
-> source .venv/bin/activate            # macOS / Linux
-> .venv\\Scripts\\activate              # Windows
-> pip install agent-framework agent-framework-foundry \\
->   azure-monitor-opentelemetry opentelemetry-sdk python-dotenv
-> cp .env.example .env                 # then edit .env and fill in your values
-> az login
-> python 04-tracing-agent.py
+Prerequisites: Python 3.13, Git, Azure CLI, a Foundry project with a
+deployed model and an Application Insights resource.
+Keep the complete repository together.
+
+1. Setup
+
+Run from any folder INSIDE this Git clone. The first command returns to
+the repository root. Reuse the same .venv as samples 01 through 03.
+Activation is not required.
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    test -x .venv/bin/python || python3.13 -m venv .venv
+    .venv/bin/python -m pip install -r requirements-first-four.txt
+    .venv/bin/python -m pip check
+    az login
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+    .\.venv\Scripts\python.exe -m pip install -r requirements-first-four.txt
+    .\.venv\Scripts\python.exe -m pip check
+    az login
+
+2. Configure
+
+From the repository root, create .env only if it is missing.
+Do not overwrite an existing configuration.
+
+macOS Terminal:
+    test -f 04-tracing-agent/.env || cp 04-tracing-agent/.env.example 04-tracing-agent/.env
+
+Windows PowerShell:
+    if (-not (Test-Path .\04-tracing-agent\.env)) { Copy-Item .\04-tracing-agent\.env.example .\04-tracing-agent\.env }
+
+Edit 04-tracing-agent/.env and set:
+    FOUNDRY_PROJECT_ENDPOINT: your Foundry project endpoint
+    FOUNDRY_MODEL: the name of your deployed model
+    APPLICATIONINSIGHTS_CONNECTION_STRING: your App Insights connection string
+The connection string is REQUIRED for this tracing sample.
+Use an Azure identity with access to the project and model.
+
+3. Run after saving .env
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    .venv/bin/python -X utf8 04-tracing-agent/04-tracing-agent.py
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    .\.venv\Scripts\python.exe -X utf8 .\04-tracing-agent\04-tracing-agent.py
+
+4. VS Code
+
+Open the repository root and use Python: Select Interpreter to choose
+.venv/bin/python on Mac or .venv\Scripts\python.exe on Windows.
+Open this file and select Run Python File. Its own folder supplies .env.
+
+Expected result: a streamed answer and a trace ID. Check Application
+Insights after ingestion to confirm the trace arrived.
+Live execution of this sample and Windows execution remain unverified.
+See README.md for tracing queries and sensitive content settings.
 """
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,17 +75,19 @@ from dotenv import load_dotenv
 # VS Code's Run button pick up the same configuration.
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _workshop import (
+    configure_console,
+    configure_tracing,
+    print_stream,
+    project_endpoint,
+    shutdown_tracing,
+)
+
 # Microsoft Foundry Agent Configuration (read from .env, see .env.example).
-ENDPOINT = os.environ.get("FOUNDRY_PROJECT_ENDPOINT", "")
+ENDPOINT = project_endpoint()
 MODEL = os.environ.get("FOUNDRY_MODEL", "gpt-4o")
 APPINSIGHTS_CONN = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "").strip()
-
-if not ENDPOINT or "<YOUR_" in ENDPOINT:
-    raise RuntimeError(
-        "FOUNDRY_PROJECT_ENDPOINT is not configured. "
-        "Copy .env.example to .env in this folder and fill in your Foundry "
-        "project endpoint. See README.md."
-    )
 
 if not APPINSIGHTS_CONN:
     raise RuntimeError(
@@ -42,28 +97,10 @@ if not APPINSIGHTS_CONN:
         "portal under your project, Manage, Tracing. See README.md."
     )
 
-# Capture prompt and completion content in OTel spans. False by default for
-# privacy reasons. Turn it on for workshops and demos, leave it off for any
-# data with regulated PII. Both env vars must be set BEFORE the framework
-# imports below so they take effect at instrumentation-setup time.
-os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true"
-os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
-
 from agent_framework import Agent
 from agent_framework.foundry import FoundryChatClient
-from agent_framework.observability import enable_instrumentation
 from azure.identity import AzureCliCredential
-from azure.monitor.opentelemetry import configure_azure_monitor
 from opentelemetry import trace
-
-# One-line install of the entire telemetry pipeline.
-configure_azure_monitor(connection_string=APPINSIGHTS_CONN)
-
-# Turn on the agent-framework GenAI instrumentation so model, tool, and
-# agent-run spans are emitted with the GenAI semantic conventions.
-enable_instrumentation(enable_sensitive_data=True)
-
-tracer = trace.get_tracer(__name__)
 
 AGENT_NAME = "ai-agent"
 AGENT_INSTRUCTIONS = "You are a helpful AI assistant."
@@ -74,7 +111,10 @@ USER_INPUTS = [
 
 
 async def main() -> None:
-    with tracer.start_as_current_span("example-tracing"):
+    configure_console()
+    configure_tracing(APPINSIGHTS_CONN, "tracing")
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("example-tracing") as root:
         client = FoundryChatClient(
             model=MODEL,
             project_endpoint=ENDPOINT,
@@ -90,19 +130,10 @@ async def main() -> None:
                 print(f"\n# User: '{user_input}'")
                 print(f"# {AGENT_NAME}: ", end="", flush=True)
 
-                async for chunk in await agent.run(user_input, stream=True):
-                    for content in chunk.contents:
-                        data = content.to_dict()
-                        if data.get("type") == "text" and data.get("text"):
-                            print(data["text"], end="", flush=True)
+                await print_stream(agent.run(user_input, stream=True))
                 print()
 
-            print("\n--- All tasks completed successfully ---")
-
-    # Give the BatchSpanProcessor a tick to flush before the process exits.
-    # In production code, prefer trace.get_tracer_provider().shutdown() in a
-    # finally block.
-    await asyncio.sleep(2.0)
+    print(f"\nTrace ID: {root.get_span_context().trace_id:032x}")
 
 
 if __name__ == "__main__":
@@ -110,9 +141,8 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        import traceback
-        traceback.print_exc()
+        raise SystemExit(130)
     finally:
-        print("Program finished.")
+        shutdown_tracing()
+    print("\n--- All tasks completed successfully ---")
+    print("Program finished.")

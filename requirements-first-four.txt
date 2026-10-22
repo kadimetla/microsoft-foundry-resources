@@ -1,0 +1,10 @@
+agent-framework-core==1.21.0
+agent-framework-foundry==1.14.1
+agent-framework-openai==1.16.0
+azure-ai-projects==2.7.0
+azure-identity==1.26.0
+azure-monitor-opentelemetry==1.8.11
+httpx==0.28.1
+openai==3.31.0
+opentelemetry-sdk==1.45.1
+python-dotenv==1.2.4

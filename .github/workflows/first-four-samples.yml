@@ -1,0 +1,53 @@
+name: First four samples
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "01-basic-agent/**"
+      - "02-mcp-tool-agent/**"
+      - "03-custom-function-tool-agent/**"
+      - "04-tracing-agent/**"
+      - "_workshop.py"
+      - "requirements-first-four.txt"
+      - "tests/test_first_four.py"
+      - ".github/workflows/first-four-samples.yml"
+  pull_request:
+    paths:
+      - "01-basic-agent/**"
+      - "02-mcp-tool-agent/**"
+      - "03-custom-function-tool-agent/**"
+      - "04-tracing-agent/**"
+      - "_workshop.py"
+      - "requirements-first-four.txt"
+      - "tests/test_first_four.py"
+      - ".github/workflows/first-four-samples.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-first-four.txt
+      - name: Install the tested SDK set
+        run: python -m pip install -r requirements-first-four.txt
+      - name: Check dependency compatibility
+        run: python -m pip check
+      - name: Run regressions without Azure credentials
+        run: python -m unittest discover -s tests -v

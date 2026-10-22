@@ -4,6 +4,12 @@ Self-contained: no API key, no extra SDK. The geocoding step turns a free-form
 city string into (lat, lon, canonical_name), then the forecast endpoint returns
 current conditions. Adapted from the Azure-Samples `remote-mcp-functions-python`
 McpWeatherApp sample (MIT-licensed).
+
+This is an imported helper, not a standalone application. Do not launch it
+with python or create another environment for it. function_app.py imports
+get_current_weather and exposes the MCP tool. Follow the complete macOS
+Terminal or Windows PowerShell instructions at the top of function_app.py
+to start Azurite and the Functions host with func start.
 """
 
 from __future__ import annotations

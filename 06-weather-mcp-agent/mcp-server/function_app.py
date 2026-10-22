@@ -1,4 +1,75 @@
-"""Workshop MCP server: a single ``get_weather`` tool over Open-Meteo.
+r"""Run the Azure Functions get_weather MCP server for sample 06.
+
+Run this project with func start, NOT python function_app.py or VS Code's
+Run Python File button. The Functions host registers the decorated MCP tool.
+weather_service.py is an imported helper and is not a separate service.
+
+Prerequisites: Python 3.13, Git, Azure Functions Core Tools v4.0.7030 or
+newer, and Docker Desktop running Linux containers for Azurite.
+Install Core Tools separately if func is not on PATH:
+    macOS with Homebrew:
+        brew tap azure/functions
+        brew install azure-functions-core-tools@4
+    Windows with Node.js/npm already installed:
+        npm install -g azure-functions-core-tools@4
+The Windows 64 bit Core Tools v4 MSI is an alternative to npm.
+
+1. Start local storage in a separate terminal
+
+The same one line Docker command works in macOS Terminal and Windows
+PowerShell. It stays in the foreground. Keep it running while the Functions
+host runs. If Azurite already listens on these ports, reuse it instead.
+    docker run --rm -p 10000:10000 -p 10001:10001 -p 10002:10002 mcr.microsoft.com/azure-storage/azurite
+
+2. Prepare the Functions project
+
+Open another terminal INSIDE this Git clone. Use this server's own .venv,
+not the root agent environment. Preserve any existing local.settings.json.
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    cd 06-weather-mcp-agent/mcp-server
+    test -x .venv/bin/python || python3.13 -m venv .venv
+    .venv/bin/python -m pip install -r requirements.txt
+    .venv/bin/python -m pip check
+    test -f local.settings.json || cp local.settings.json.example local.settings.json
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    Set-Location .\06-weather-mcp-agent\mcp-server
+    if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+    .\.venv\Scripts\python.exe -m pip check
+    if (-not (Test-Path local.settings.json)) { Copy-Item local.settings.json.example local.settings.json }
+
+Review local.settings.json before startup. For the emulator, Values must
+include AzureWebJobsStorage=UseDevelopmentStorage=true and
+FUNCTIONS_WORKER_RUNTIME=python. Keep the optional App Insights string empty
+unless you want local telemetry sent to that Azure resource.
+No Open-Meteo API key or Azure model deployment is needed for this server.
+Do not commit local.settings.json if you add credentials.
+
+3. Start from the server directory prepared above
+
+macOS Terminal:
+    source .venv/bin/activate
+    func start
+
+Windows PowerShell:
+    $env:VIRTUAL_ENV = (Resolve-Path .venv).Path
+    $env:PATH = "$env:VIRTUAL_ENV\Scripts;$env:PATH"
+    func start
+
+The Windows commands select the venv without running Activate.ps1 or
+changing PowerShell execution policy. Keep both terminals open.
+The local MCP endpoint is http://localhost:7071/runtime/webhooks/mcp.
+Core Tools skips authorization by default locally. Azure deployment uses
+the authentication described below. Do not reuse an Azure key locally.
+Connect a LOCAL MCP client to this endpoint. The sample 06 agent uses
+hosted MCP, so Azure cannot call this localhost URL directly.
+Press Ctrl+C in each terminal to stop the host and local storage.
+Local startup on Mac and Windows remains unverified. For deployment, use
+this directory's README.md. Do not redeploy just to run an existing agent.
 
 Hosted on Azure Functions using the MCP extension (Python v2 model). Once
 deployed, this exposes ``https://<app>.azurewebsites.net/runtime/webhooks/mcp``

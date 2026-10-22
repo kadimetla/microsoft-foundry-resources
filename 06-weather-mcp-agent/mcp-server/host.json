@@ -4,7 +4,7 @@
     "mcp": {
       "instructions": "Workshop MCP server exposing get_weather (Open-Meteo).",
       "system": {
-        "webhookAuthorizationLevel": "Anonymous"
+        "webhookAuthorizationLevel": "System"
       }
     }
   },

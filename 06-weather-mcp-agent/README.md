@@ -651,9 +651,23 @@ it like a password.** It goes in `.env` next.
 
 ### Step 6 — Configure the agent
 
+Start inside this Git clone. Preserve an existing `.env`, especially one that
+already contains a deployed MCP endpoint and key.
+
+macOS Terminal:
+
 ```bash
-cd ..    # back to 06-weather-mcp-agent/
-cp .env.example .env
+cd "$(git rev-parse --show-toplevel)"
+cd 06-weather-mcp-agent
+test -f .env || cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+Set-Location .\06-weather-mcp-agent
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Open `.env` and fill in:
@@ -676,23 +690,57 @@ APPLICATIONINSIGHTS_CONNECTION_STRING=<paste here too>
 
 ### Step 7 — Install agent dependencies
 
+Use the repository root environment shared with samples 01 through 04.
+The existing pinned requirements also supply this agent's dependencies.
+Do not install an unpinned `agent-framework` metapackage into another environment.
+Python 3.13, Git and Azure CLI must be installed.
+
+macOS Terminal:
+
 ```bash
-python3.11 -m venv .venv             # 3.11 or 3.13, your choice
-source .venv/bin/activate
-pip install agent-framework azure-monitor-opentelemetry python-dotenv --pre
+cd "$(git rev-parse --show-toplevel)"
+test -x .venv/bin/python || python3.13 -m venv .venv
+.venv/bin/python -m pip install -r requirements-first-four.txt
+.venv/bin/python -m pip check
+az login
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+.\.venv\Scripts\python.exe -m pip install -r requirements-first-four.txt
+.\.venv\Scripts\python.exe -m pip check
+az login
 ```
 
 ### Step 8 — Run the agent
 
+Save `06-weather-mcp-agent/.env` first. Foundry calls the deployed MCP server,
+so do not replace its endpoint with localhost. This process does not publish a
+named Foundry agent.
+
+macOS Terminal:
+
 ```bash
-python 06-weather-mcp-agent.py
+cd "$(git rev-parse --show-toplevel)"
+.venv/bin/python -X utf8 06-weather-mcp-agent/06-weather-mcp-agent.py
 ```
 
-> 💡 **VS Code shortcut.** Open `06-weather-mcp-agent.py` and click the
-> ▶ **Run Python File** button in the editor's top-right corner. The Python
-> extension auto-loads `06-weather-mcp-agent/.env` into the run, so all the
-> values you just set in Step 6 are picked up automatically — no extra
-> launch.json needed. To debug instead, click the ▼ next to ▶ → **Debug**.
+Windows PowerShell:
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+.\.venv\Scripts\python.exe -X utf8 .\06-weather-mcp-agent\06-weather-mcp-agent.py
+```
+
+> **VS Code.** Select the repository root `.venv` interpreter, open
+> `06-weather-mcp-agent.py` and select **Run Python File**.
+> The script itself loads `06-weather-mcp-agent/.env`.
+
+The MCP server was verified separately after deployment. A complete invocation
+of this agent through Foundry and Windows execution remain unverified.
 
 Expected output:
 

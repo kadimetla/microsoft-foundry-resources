@@ -167,7 +167,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         }
         {
           name: 'OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST'
-          value: 'traceparent,x-functions-key'
+          value: 'traceparent'
         }
       ]
     }

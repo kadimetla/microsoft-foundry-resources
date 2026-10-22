@@ -1,26 +1,84 @@
-# Foundry agent → Azure Functions MCP server (workshop sample 06).
-#
-# Setup (one-time):
-#   cd 06-weather-mcp-agent
-#   cp .env.example .env                # then fill in the required values
-#   python -m venv .venv && source .venv/bin/activate
-#   pip install agent-framework azure-monitor-opentelemetry python-dotenv --pre
-#   az login                            # FoundryChatClient uses your CLI creds
-#
-# Run:
-#   python 06-weather-mcp-agent.py
-#
-# Auth modes (selected by WEATHER_MCP_AUTH):
-#   - "key"   (iteration 1, default if WEATHER_MCP_AUDIENCE is unset):
-#             pass the ``mcp_extension`` system key as ``x-functions-key``.
-#             Works only while ``host.json`` keeps ``webhookAuthorizationLevel: "System"``
-#             AND Easy Auth is OFF on the Function App.
-#   - "entra" (iteration 2):
-#             mint an Entra v2 token for ``api://<WEATHER_MCP_AUDIENCE>`` using
-#             AzureCliCredential and pass it as ``Authorization: Bearer``.
-#             Works when Easy Auth is ON and the caller's SP has been granted
-#             the ``MCP.Invoke`` app role on the MCP audience. This mirrors the
-#             exact flow Foundry's Agent Identity uses in production.
+r"""Run a Foundry agent with the Azure Functions weather MCP tool (sample 06).
+
+Prerequisites: Python 3.13, Git, Azure CLI, a Foundry project with a
+deployed model and a deployed weather MCP server. Keep the full repository
+together because this script imports the shared observability helpers.
+The model and MCP tool execution are hosted in Azure. This Python process
+orchestrates the conversation and does not publish a named Foundry agent.
+Foundry must reach the MCP endpoint. A localhost URL will not work here.
+
+1. Setup
+
+Start from any folder INSIDE this Git clone, not the parent foundry folder.
+The first command returns to the repository root. Reuse the root .venv
+from samples 01 through 04. Activation is not required.
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    test -x .venv/bin/python || python3.13 -m venv .venv
+    .venv/bin/python -m pip install -r requirements-first-four.txt
+    .venv/bin/python -m pip check
+    az login
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    if (-not (Test-Path .venv\Scripts\python.exe)) { py -3.13 -m venv .venv }
+    .\.venv\Scripts\python.exe -m pip install -r requirements-first-four.txt
+    .\.venv\Scripts\python.exe -m pip check
+    az login
+
+2. Configure
+
+Keep the existing 06-weather-mcp-agent/.env with its deployed endpoint and
+credentials. From the repository root, create it ONLY when it is missing.
+
+macOS Terminal:
+    test -f 06-weather-mcp-agent/.env || cp 06-weather-mcp-agent/.env.example 06-weather-mcp-agent/.env
+
+Windows PowerShell:
+    if (-not (Test-Path .\06-weather-mcp-agent\.env)) { Copy-Item .\06-weather-mcp-agent\.env.example .\06-weather-mcp-agent\.env }
+
+Edit 06-weather-mcp-agent/.env and fill in:
+    FOUNDRY_PROJECT_ENDPOINT: https://<resource>.services.ai.azure.com/api/projects/<project>
+    FOUNDRY_MODEL: the name of your deployed model
+    WEATHER_MCP_ENDPOINT: https://<function-app>.azurewebsites.net/runtime/webhooks/mcp
+    WEATHER_MCP_AUTH: key
+    WEATHER_MCP_KEY: the Function App's mcp_extension SYSTEM key
+    WEATHER_MCP_AUDIENCE: leave empty for key authentication
+    APPLICATIONINSIGHTS_CONNECTION_STRING: optional shared App Insights string
+
+Get the project endpoint and deployment name from Foundry. Get the system
+key from the Function App in Azure or the command below, replacing BOTH
+placeholders. Do not use a function key or host key instead.
+    az functionapp keys list --resource-group "<resource-group>" --name "<function-app>" --query systemKeys.mcp_extension -o tsv
+
+Key mode requires host.json webhookAuthorizationLevel=System and Easy Auth
+off. The alternative entra mode requires an already configured Entra MCP
+application and Easy Auth. Set WEATHER_MCP_AUDIENCE to its full Application
+ID URI, such as api://<app-client-id>, with suitable access for your Azure
+CLI identity, or provide WEATHER_MCP_TOKEN. See README.md for that setup.
+Do not leave WEATHER_MCP_AUTH blank. Do not change Azure authentication
+settings just to run an already deployed key mode server.
+If no server exists yet, follow mcp-server/README.md to deploy one first.
+
+3. Run after saving .env
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    .venv/bin/python -X utf8 06-weather-mcp-agent/06-weather-mcp-agent.py
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    .\.venv\Scripts\python.exe -X utf8 .\06-weather-mcp-agent\06-weather-mcp-agent.py
+
+4. VS Code
+
+Select the repository root .venv interpreter and Run Python File.
+This script loads .env from its own folder, regardless of terminal location.
+Expected result: answers to three weather questions using get_weather.
+The deployed MCP server was verified separately. This agent's complete
+Foundry invocation and Windows execution remain unverified.
+"""
 
 from __future__ import annotations
 
@@ -34,16 +92,17 @@ from agent_framework.foundry import FoundryChatClient
 from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
 
-# Reuse the workshop's shared observability bootstrap (Application Insights
-# wiring + GenAI content recording). Lives one directory up.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _observability import init_observability  # noqa: E402
+# Reuse the observability bootstrap from sample 02.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "02-mcp-tool-agent"))
+from _observability import init_observability, project_endpoint, shutdown_tracing  # noqa: E402
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-PROJECT_ENDPOINT = os.environ["FOUNDRY_PROJECT_ENDPOINT"]
+PROJECT_ENDPOINT = project_endpoint()
 MODEL = os.environ.get("FOUNDRY_MODEL", "gpt-4o")
-MCP_ENDPOINT = os.environ["WEATHER_MCP_ENDPOINT"]
+MCP_ENDPOINT = os.environ.get("WEATHER_MCP_ENDPOINT", "").strip()
+if not MCP_ENDPOINT or "<" in MCP_ENDPOINT:
+    raise RuntimeError("Set WEATHER_MCP_ENDPOINT in this folder's .env to the deployed MCP endpoint.")
 
 # Auth selection: default to "entra" when WEATHER_MCP_AUDIENCE is provided
 # (iteration 2 deployment), otherwise fall back to "key" (iteration 1).
@@ -81,6 +140,9 @@ def _build_mcp_headers(credential: AzureCliCredential) -> dict[str, str]:
 
     For ``key`` mode, ``WEATHER_MCP_KEY`` is sent as ``x-functions-key``.
     """
+    if AUTH_MODE not in ("key", "entra"):
+        raise RuntimeError("WEATHER_MCP_AUTH must be 'key' or 'entra'.")
+
     if AUTH_MODE == "entra":
         pre_acquired = os.environ.get("WEATHER_MCP_TOKEN", "").strip()
         if pre_acquired:
@@ -150,9 +212,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")
-    except Exception as exc:  # noqa: BLE001
-        import traceback
-        print(f"An unexpected error occurred: {exc}")
-        traceback.print_exc()
+        raise SystemExit(130)
     finally:
+        shutdown_tracing()
         print("Program finished.")

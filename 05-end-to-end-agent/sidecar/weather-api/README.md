@@ -2,15 +2,18 @@
 
 A minimal Flask app that plays the role of *"the downstream API your agent calls"* in every sample in this repo. It validates incoming Agent Identity tokens and returns real weather data from [Open-Meteo](https://open-meteo.com) (no key required).
 
-This service is intentionally boring. The interesting part is the token validation — it proves that Entra Agent ID tokens work cryptographically end-to-end.
+This service demonstrates the downstream token flow for sample 05.
+Its workshop validation includes a Graph token compatibility fallback.
+Read `app.py` for the exact checks rather than treating it as a general
+purpose token validation library.
 
 ## What it does
 
-- Exposes `GET /weather?city=<name>` and `GET /healthz`.
+- Exposes `GET /weather?city=<name>`, `GET /weather/forecast?city=<name>` and `GET /health`.
 - On every request to `/weather`, validates the `Authorization: Bearer <token>` header:
-  - **Signature** — RS256 verified against the JWKS at `https://login.microsoftonline.com/<tenant>/discovery/v2.0/keys`
+  - **Signature**: attempts RS256 verification against the Entra JWKS. The Graph nonce compatibility path can skip signature verification.
   - **Issuer** — must match `https://sts.windows.net/<tenant>/` or `https://login.microsoftonline.com/<tenant>/v2.0`
-  - **Audience** — configurable; defaults to Microsoft Graph (`https://graph.microsoft.com`) so the same Agent tokens work for local testing
+  - **Audience**: the workshop code does not check `aud`. There is no supported `EXPECTED_AUDIENCE` setting.
   - **Agent-identity marker** — the `xms_par_app_azp` claim (present in Agent tokens, absent in plain app-only tokens) is logged so you can see which Blueprint minted the call
 - Returns real weather on success, HTTP 401 with a reason on any validation failure.
 
@@ -26,20 +29,48 @@ This service is intentionally boring. The interesting part is the token validati
                                  └──────────────────┘
 ```
 
-Both the [`dev/`](../dev/README.md) (Ollama) and [`aws/`](../aws/README.md) (Bedrock) sidecar samples call this exact same container — the cross-cloud story only works because the downstream API is identical.
+The [`foundry/`](../foundry/README.md) Compose stack starts this API alongside
+the agent and auth sidecar. The Ollama and Bedrock variants live in the external
+[`3P-Agent-ID-Demo`](https://github.com/razi-rais/3P-Agent-ID-Demo) repository,
+not in sibling folders here.
 
 ## Run it standalone
 
+Prefer the complete [Foundry Compose quickstart](../foundry/README.md#5-quickstart)
+when running sample 05. The standalone commands below start only this API.
+They require Git, Docker Desktop running Linux containers and a real Entra
+tenant ID. Start from any folder inside this clone.
+The app reads process environment variables, not `.env` automatically.
+
+### macOS Terminal
+
 ```bash
-# From sidecar/weather-api
+cd "$(git rev-parse --show-toplevel)"
+cd 05-end-to-end-agent/sidecar/weather-api
 docker build -t weather-api:local .
-docker run --rm -p 8080:8080 \
-  -e TENANT_ID=<your-tenant-id> \
-  -e EXPECTED_AUDIENCE=https://graph.microsoft.com \
-  weather-api:local
+printf "Entra tenant ID: "
+read -r TENANT_ID
+docker run --rm -p 8080:8080 -e "TENANT_ID=$TENANT_ID" -e VALIDATE_TOKEN_SIGNATURE=true weather-api:local
 ```
 
-Then, with an Agent Identity token from [`../../scripts/README.md`](../../scripts/README.md):
+### Windows PowerShell
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+Set-Location .\05-end-to-end-agent\sidecar\weather-api
+docker build -t weather-api:local .
+$tenantId = Read-Host "Entra tenant ID"
+docker run --rm -p 8080:8080 -e "TENANT_ID=$tenantId" -e VALIDATE_TOKEN_SIGNATURE=true weather-api:local
+```
+
+Open <http://localhost:8080/health> for the unauthenticated health route.
+For weather requests, use the bearer token obtained by the
+[Foundry sidecar flow](../foundry/README.md). Starting this API does not mint
+tokens or provision identities. Press Ctrl+C to stop the standalone service.
+Do not also start it when Compose is already managing the API.
+Mac and Windows startup remain unverified.
+
+Optional weather request from macOS Terminal, using your Agent Identity token:
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
@@ -68,19 +99,22 @@ Expected response (real data):
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `TENANT_ID` | yes | — | Entra tenant — used to build JWKS URL and issuer check |
-| `EXPECTED_AUDIENCE` | no | `https://graph.microsoft.com` | Accepted `aud` value on the token |
-| `PORT` | no | `8080` | HTTP port |
+| `VALIDATE_TOKEN_SIGNATURE` | no | `true` | Enables the existing JWKS validation path and its Graph compatibility behavior |
+
+The application listens on port `8080`. There is no `PORT` override in this
+implementation. Docker can map a different host port if required.
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `app.py` | Flask app — route handlers, token validation, Open-Meteo client |
-| `Dockerfile` | `python:3.13-slim` base, runs `gunicorn app:app -b 0.0.0.0:8080` |
-| `requirements.txt` | `flask`, `pyjwt[crypto]`, `cryptography`, `requests`, `gunicorn` |
+| `Dockerfile` | `python:3.11-slim` base, runs `python app.py` |
+| `requirements.txt` | `flask`, `flask-cors`, `PyJWT[crypto]`, `requests` |
 
 ## Why this is in the repo
 
-Token validation libraries differ between ecosystems (Python, Node, .NET). Having a *known-good* validator that the `dev` and `aws` samples both hit makes issues much easier to isolate — if both samples fail against `weather-api`, the problem is the sidecar or Entra config, not the downstream API.
+The shared service makes the sample 05 flow easier to inspect because the
+agent UI, token acquisition and downstream weather request stay separate.
 
 For the conceptual overview of how tokens flow from agent → sidecar → API, see [`../README.md`](../README.md).

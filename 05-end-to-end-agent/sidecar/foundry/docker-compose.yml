@@ -66,7 +66,8 @@ services:
       - TENANT_ID=${TENANT_ID}
       - CLIENT_SPA_APP_ID=${CLIENT_SPA_APP_ID:-}
       # Microsoft Foundry — set FOUNDRY_API_KEY for the quickest path,
-      # otherwise DefaultAzureCredential is used (requires az login / Managed Identity).
+      # Otherwise DefaultAzureCredential needs environment credentials or
+      # an Azure host providing Managed Identity. This image has no Azure CLI.
       - FOUNDRY_ENDPOINT=${FOUNDRY_ENDPOINT}
       - FOUNDRY_MODEL=${FOUNDRY_MODEL:-gpt-4o-mini}
       - FOUNDRY_API_KEY=${FOUNDRY_API_KEY:-}
@@ -83,13 +84,13 @@ services:
       # OpenAI-compatible /openai/v1 endpoint also works for AIServices.
       - USE_FOUNDRY_INFERENCE_SDK=${USE_FOUNDRY_INFERENCE_SDK:-false}
       - FOUNDRY_INFERENCE_ENDPOINT=${FOUNDRY_INFERENCE_ENDPOINT:-}
-      # Forwarded into the container so DefaultAzureCredential's CLI / EnvironmentCredential paths work
+      # Forwarded for DefaultAzureCredential's EnvironmentCredential path.
       - AZURE_CLIENT_ID=${AZURE_CLIENT_ID:-}
       - AZURE_TENANT_ID=${AZURE_TENANT_ID:-}
       - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET:-}
       - AZURE_CONFIG_DIR=/root/.azure
-    # Mount your host az-cli login so DefaultAzureCredential can find a cached token.
-    # Comment out if you set FOUNDRY_API_KEY (then no Azure CLI is needed).
+    # Optional CLI configuration mount for a custom image containing Azure CLI.
+    # The supplied image cannot use host az login without Azure CLI installed.
     volumes:
       - ${HOME}/.azure:/root/.azure:ro
     depends_on:

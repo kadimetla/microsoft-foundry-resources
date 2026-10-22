@@ -1,6 +1,44 @@
-"""
-Weather API - Validates Agent Identity Tokens
-This API calls real weather data and requires valid Agent ID tokens.
+r"""Run the Flask weather API used by sample 05.
+
+This service reads weather data from Open-Meteo. Weather routes require an
+Agent Identity bearer token. GET /health does not require authentication.
+This service is not the Azure Functions MCP server from sample 06.
+
+Recommended startup: use the macOS Terminal or Windows PowerShell Compose
+instructions at the top of ../foundry/app.py. Compose builds this API,
+supplies TENANT_ID and starts the auth sidecar and agent UI together.
+Do not start a second standalone API when using that Compose stack.
+
+Optional standalone startup
+
+Prerequisites: Git, Docker Desktop running Linux containers, internet access
+to Open-Meteo and Entra, and your Entra tenant ID. Docker supplies Python
+3.11 and installs this directory's requirements.txt. No host .venv is needed.
+Start from any folder INSIDE this Git clone. Enter your real tenant ID when
+prompted. These commands keep the existing signature validation setting on.
+This app reads process environment variables, not a .env file automatically.
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    cd 05-end-to-end-agent/sidecar/weather-api
+    docker build -t weather-api:local .
+    printf "Entra tenant ID: "
+    read -r TENANT_ID
+    docker run --rm -p 8080:8080 -e "TENANT_ID=$TENANT_ID" -e VALIDATE_TOKEN_SIGNATURE=true weather-api:local
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    Set-Location .\05-end-to-end-agent\sidecar\weather-api
+    docker build -t weather-api:local .
+    $tenantId = Read-Host "Entra tenant ID"
+    docker run --rm -p 8080:8080 -e "TENANT_ID=$tenantId" -e VALIDATE_TOKEN_SIGNATURE=true weather-api:local
+
+Open http://localhost:8080/health to see the service status.
+GET /weather?city=Seattle and GET /weather/forecast?city=Seattle require an
+Authorization: Bearer <token> header. Starting the API does not mint tokens
+or provision Agent Identities. Use the sidecar flow described in
+../foundry/README.md for tokens. Press Ctrl+C to stop this standalone API.
+These startup instructions have not been executed on Mac or Windows.
 """
 
 import os

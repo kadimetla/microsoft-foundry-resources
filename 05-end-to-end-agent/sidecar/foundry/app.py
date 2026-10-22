@@ -1,6 +1,78 @@
-"""
-LLM Agent with Weather Tool - Uses LangChain + Microsoft Foundry + Agent Identity for secure API calls
-This agent demonstrates how an AI agent uses tools with Agent Identity tokens.
+r"""Run the LangChain weather agent with an Entra Agent ID sidecar (sample 05).
+
+The Flask UI calls a Foundry model. Its weather tool gets an Agent Identity
+token from the auth sidecar and calls the separate weather API.
+Docker Compose starts all three services. This does not publish a Foundry
+agent definition or provision Entra identities.
+
+Prerequisites: Git and Docker Desktop running with Linux containers.
+The Dockerfiles provide Python 3.11 and install each requirements.txt.
+No host Python installation or shared repository .venv is needed.
+You must already have a Foundry model deployment, an Entra tenant,
+an Agent Identity Blueprint, its client credential and an Agent Identity.
+For OBO, also provision the SPA registration and delegated consent described
+in README.md. The identity bootstrap is not included in this repository.
+
+1. Prepare configuration
+
+Start from any folder INSIDE this Git clone. Commands preserve an existing
+.env. The .azure folder is needed for the existing Compose bind mount.
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    cd 05-end-to-end-agent/sidecar/foundry
+    test -f .env || cp .env.example .env
+    mkdir -p "$HOME/.azure"
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    Set-Location .\05-end-to-end-agent\sidecar\foundry
+    if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+    $env:HOME = $HOME
+    New-Item -ItemType Directory -Force -Path (Join-Path $HOME ".azure") | Out-Null
+
+Edit 05-end-to-end-agent/sidecar/foundry/.env and set:
+    TENANT_ID: Entra tenant ID
+    BLUEPRINT_APP_ID: Blueprint application client ID
+    BLUEPRINT_CLIENT_SECRET: the Blueprint credential value, not its ID
+    AGENT_CLIENT_ID: Agent Identity client ID
+    CLIENT_SPA_APP_ID: SPA client ID, required only for OBO sign in
+    FOUNDRY_ENDPOINT: https://<resource>.services.ai.azure.com/openai/v1
+    FOUNDRY_MODEL: your model deployment name
+    FOUNDRY_API_KEY: your Foundry resource API key for this local quickstart
+    APPLICATIONINSIGHTS_CONNECTION_STRING: optional tracing connection string
+
+The supplied image does not contain Azure CLI. Running az login on the host
+alone is NOT sufficient for DefaultAzureCredential inside this container.
+Instead of FOUNDRY_API_KEY, an existing service principal can use all three
+AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_CLIENT_SECRET settings.
+See README.md for identity setup and the optional inference tracing path.
+Do not change the Compose service URLs to localhost. They use Docker DNS.
+
+2. Start after saving .env
+
+macOS Terminal:
+    cd "$(git rev-parse --show-toplevel)"
+    cd 05-end-to-end-agent/sidecar/foundry
+    docker compose --env-file .env up --build
+
+Windows PowerShell:
+    Set-Location -LiteralPath (git rev-parse --show-toplevel)
+    Set-Location .\05-end-to-end-agent\sidecar\foundry
+    $env:HOME = $HOME
+    docker compose --env-file .env up --build
+
+Open http://localhost:3004 and choose Foundry mode, then ask for the weather.
+Autonomous mode uses the Agent Identity. OBO also requires user sign in.
+The weather API and auth sidecar stay inside the Compose network.
+Do not use Run Python File as the complete startup procedure for this app.
+
+3. Stop
+
+Press Ctrl+C in the Compose terminal. From the same service directory:
+    docker compose --env-file .env down
+On Windows, retain $env:HOME = $HOME in that terminal for Compose expansion.
+These startup instructions have not been executed on Mac or Windows.
 """
 
 import os

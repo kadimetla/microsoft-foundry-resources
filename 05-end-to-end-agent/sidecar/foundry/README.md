@@ -212,19 +212,59 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ## 5. Quickstart
 
-```bash
-# From sidecar/foundry
-cp .env.example .env
-# edit .env and fill in:
-#   TENANT_ID, BLUEPRINT_APP_ID, AGENT_CLIENT_ID, CLIENT_SPA_APP_ID
-#   BLUEPRINT_CLIENT_SECRET
-#   FOUNDRY_ENDPOINT, FOUNDRY_MODEL
-#   FOUNDRY_API_KEY  (or leave blank and `az login` on the host)
+Start a terminal anywhere inside this Git clone. Docker Desktop must be running
+with Linux containers. The images supply Python 3.11 and install their own
+requirements, so do not use the repository root `.venv` for this sample.
+The Entra identities, consent and model deployment from the prerequisites must
+already exist. These commands preserve an existing `.env`.
 
+### macOS Terminal
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+cd 05-end-to-end-agent/sidecar/foundry
+test -f .env || cp .env.example .env
+mkdir -p "$HOME/.azure"
+```
+
+### Windows PowerShell
+
+```powershell
+Set-Location -LiteralPath (git rev-parse --show-toplevel)
+Set-Location .\05-end-to-end-agent\sidecar\foundry
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+$env:HOME = $HOME
+New-Item -ItemType Directory -Force -Path (Join-Path $HOME ".azure") | Out-Null
+```
+
+Edit `.env` and set `TENANT_ID`, `BLUEPRINT_APP_ID`, `AGENT_CLIENT_ID`,
+`BLUEPRINT_CLIENT_SECRET`, `FOUNDRY_ENDPOINT`, `FOUNDRY_MODEL` and
+`FOUNDRY_API_KEY`. Also set `CLIENT_SPA_APP_ID` for OBO sign in.
+Use the Blueprint secret **value**, not the secret ID.
+`APPLICATIONINSIGHTS_CONNECTION_STRING` is optional.
+
+From the service directory selected above, this command works in both shells:
+
+```text
 docker compose --env-file .env up --build
 ```
 
-Open <http://localhost:3004> and try `Weather in Dallas?`. Toggle between `Direct` / `Foundry` and `Autonomous` / `OBO` in the UI to watch the token flow change in the right-hand panel.
+On Windows, keep `$env:HOME = $HOME` set in the Compose terminal. This supplies
+the home directory used by the existing Azure configuration bind mount.
+Keep the terminal open, visit <http://localhost:3004>, choose **Foundry** and
+try `Weather in Dallas?`. Toggle between `Direct` / `Foundry` and
+`Autonomous` / `OBO` to inspect the token flow.
+Do not run `python app.py` as a replacement for the complete Compose stack.
+The service URLs use Docker DNS rather than host localhost addresses.
+
+Press Ctrl+C to stop. From the same directory and terminal, remove the stopped
+Compose containers with:
+
+```text
+docker compose --env-file .env down
+```
+
+These Mac and Windows startup instructions have been reviewed but not executed.
 
 ### `FOUNDRY_ENDPOINT` quick reference
 
@@ -244,10 +284,14 @@ The agent talks to Foundry via the [Azure AI Inference](https://learn.microsoft.
 | Mode | When | How |
 |---|---|---|
 | **API key** | Workshops, quickest demo | Set `FOUNDRY_API_KEY` in `.env`. The agent uses `AzureKeyCredential`. |
-| **DefaultAzureCredential** | Production-ish, no key in env | Leave `FOUNDRY_API_KEY` blank. The compose file mounts your host `~/.azure` into the container so the cached `az login` token is reused. In Azure deployments, Managed Identity is picked up automatically — grant your MI the **Azure AI Developer** role on the Foundry project. |
+| **DefaultAzureCredential** | An already configured identity | Leave `FOUNDRY_API_KEY` blank and set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` for an existing service principal. Compose forwards all three variables. Managed Identity is an alternative on an Azure host that provides it. Grant the identity the model access required by your endpoint. |
 
 > [!TIP]
-> If you go the `DefaultAzureCredential` route, run `az login` on the host *before* `docker compose up`. The container is read-only-mounted at `~/.azure`, so re-logins don't need to be repeated for short demo runs.
+> The supplied Dockerfile does not install Azure CLI. Mounting `~/.azure` and
+> signing in on the host is not enough for `AzureCliCredential` inside this image.
+> Use the API key quickstart or the environment credential settings above.
+> Host CLI authentication would also require an appropriately configured image
+> containing Azure CLI.
 
 ---
 
